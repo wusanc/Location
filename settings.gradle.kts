@@ -1,26 +1,23 @@
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
+        google()
         mavenCentral()
         gradlePluginPortal()
     }
 }
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
-}
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
+        maven { url = uri("https://maven.aliyun.com/nexus/content/repositories/google") }
+        maven { url = uri("https://maven.aliyun.com/nexus/content/groups/public") }
         google()
         mavenCentral()
+        maven { url = uri("https://api.xposed.info/") }
+        maven { url = uri("https://jitpack.io") }
     }
 }
-
 rootProject.name = "Location"
 include(":app")
+include(":xposed")
+include(":system-api")
+include(":nmea")

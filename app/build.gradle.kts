@@ -4,42 +4,81 @@ plugins {
 
 android {
     namespace = "com.wusan.location"
-    compileSdk {
-        version = release(37)
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.wusan.location"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["BUGLY_APPID"] = "222f9ef298"
+        ndk {
+            abiFilters.add("arm64-v8a")
+            abiFilters.add("x86_64")
+        }
     }
 
     buildTypes {
+        debug {
+            manifestPlaceholders["APP_VERSION"] = "1.0-debug"
+            manifestPlaceholders["BUGLY_ENABLE_DEBUG"] = "true"
+        }
         release {
-            optimization {
-                enable = false
-            }
+            isMinifyEnabled = false
+            manifestPlaceholders["APP_VERSION"] = "1.0"
+            manifestPlaceholders["BUGLY_ENABLE_DEBUG"] = "false"
         }
     }
+
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildFeatures {
+        viewBinding = true
+        buildConfig = true
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            excludes += "lib/armeabi/**"
+            excludes += "lib/x86/**"
+            excludes += "lib/x86_64/libBaiduMapSDK**"
+            excludes += "lib/x86_64/libc++_shared.so"
+            excludes += "lib/x86_64/liblocSDK8b.so"
+            excludes += "lib/x86_64/libtiny_magic.so"
+        }
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/NOTICE*"
+            excludes += "/META-INF/LICENSE*"
+            excludes += "/META-INF/DEPENDENCIES*"
+            excludes += "/META-INF/*.kotlin_module"
+            excludes += "/META-INF/INDEX.LIST"
+        }
+    }
+    sourceSets {
+        getByName("main").jniLibs.directories.add("libs")
     }
 }
 
 dependencies {
-    compileOnly("io.github.libxposed:api:102.0.0")
+    implementation(project(":xposed"))
 
-    implementation(libs.androidx.activity.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
     implementation(libs.material)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(libs.androidx.junit)
+    implementation(libs.androidx.constraintlayout)
+    implementation(libs.androidx.lifecycle.livedata.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.navigation.fragment.ktx)
+    implementation(libs.androidx.navigation.ui.ktx)
+
+    implementation(libs.okhttp)
+    implementation(libs.fastjson)
+    implementation(libs.kotlin.reflect)
+    implementation(libs.bugly)
+    implementation(libs.geotools)
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 }
