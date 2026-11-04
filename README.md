@@ -29,8 +29,8 @@
 **Android Studio**：`Build → Build Bundle(s) / APK(s) → Build APK(s)`
 **命令行**（`java` 不在 PATH 时需要先指定 JDK）：
 ```powershell
-$env:JAVA_HOME = 'D:\Program Files\Android\Android Studio\jbr'
-$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+$env:JAVA_HOME = 'yourJavaPath'
+$env:Path = "yourPath"
 .\gradlew.bat :app:assembleDebug
 ```
 产物：
