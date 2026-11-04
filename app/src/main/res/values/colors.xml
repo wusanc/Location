@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorAccent">#D81B60</color>
+
+    <!-- ================= 微信风格基础色 ================= -->
+    <!-- 品牌绿：主按钮、选中态、开关、滑块 -->
+    <color name="wechat_green">#07C160</color>
+    <color name="wechat_green_dark">#06AD56</color>
+    <color name="wechat_green_ripple">#1F07C160</color>
+    <!-- 页面底色（微信的浅灰） -->
+    <color name="wechat_bg">#EDEDED</color>
+    <!-- 卡片 / 内容白 -->
+    <color name="wechat_surface">#FFFFFF</color>
+    <!-- 底部标签栏底色 -->
+    <color name="wechat_nav_bg">#F7F7F7</color>
+    <color name="wechat_divider">#E5E5E5</color>
+    <!-- 文字三级 -->
+    <color name="wechat_text_primary">#191919</color>
+    <color name="wechat_text_secondary">#7F7F7F</color>
+    <color name="wechat_text_hint">#B2B2B2</color>
+
+    <color name="primary">#FFFFFFFF</color>
+    <color name="primary_dark">#FFFFFFFF</color>
+    <color name="accent">#07C160</color>
+    <color name="accentFallback">#757575</color>
+    <color name="icon_grey">#757575</color>
+
+    <color name="red500">#F44336</color>
+    <color name="green500">#07C160</color>
+    <color name="grey500">#9E9E9E</color>
+    <color name="blue500">#2196f3</color>
+    <color name="yellow500">#FFC107</color>
+
+    <color name="dark_secondary_text">#dedede</color>
+
+    <!-- Flashing colors -->
+    <color name="flashing_background_color">@android:color/black</color>
+    <color name="ic_launcher_background">#00B0FF</color>
+
+    <!-- 顶栏：微信是浅灰底 + 深色字 -->
+    <color name="theme_appbar_color">@color/wechat_bg</color>
+    <color name="theme_side_nav_text_color">@color/wechat_text_primary</color>
+    <color name="theme_side_nav_start_color">@color/wechat_nav_bg</color>
+    <color name="theme_side_nav_center_color">@color/wechat_bg</color>
+    <color name="theme_side_nav_end_color">@color/wechat_nav_bg</color>
+    <color name="theme_appbar_text_color">@color/wechat_text_primary</color>
+    <color name="theme_appbar_icon_color">@color/wechat_text_primary</color>
+    <color name="theme_nav_icon_color">@color/wechat_text_primary</color>
+    <color name="theme_active">@color/wechat_green</color>
+    <color name="theme_focused_touch">@color/wechat_green_ripple</color>
+
+    <color name="portal_appbar_color">@color/wechat_bg</color>
+    <color name="portal_appbar_color_center">#E0E0E0</color>
+    <color name="portal_appbar_color_dark">#D6D6D6</color>
+    <color name="portal_mini_title_color">@color/wechat_text_primary</color>
+    <color name="portal_hint_color">@color/wechat_text_hint</color>
+    <color name="portal_text_color">@color/wechat_text_primary</color>
+    <color name="portal_nav_icon">@color/wechat_text_primary</color>
+    <color name="portal_mock_off">@color/wechat_text_primary</color>
+    <color name="portal_mock_on">@color/wechat_green</color>
+
+    <!-- 地图信息窗：仍是深色半透明，保证压在地图上也清晰 -->
+    <color name="portal_location_detail_background">#bb5F5F5F</color>
+    <color name="portal_location_detail_block">#aaFFFFFF</color>
+
+    <color name="selected_color">@color/wechat_divider</color>
+
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="colorPrimary">#07C160</color>
+    <color name="colorPrimaryDark">#06AD56</color>
+</resources>
