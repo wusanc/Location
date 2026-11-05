@@ -93,4 +93,10 @@
     <string name="step_cadence_invalid">请输入 1～300 的整数</string>
     <string name="step_settings_failed">步频配置保存失败</string>
     <string name="step_settings_saved">已保存，约 1 秒后生效</string>
+    <string name="appearance_title">外观模式</string>
+    <string name="appearance_desc">切换浅色或深色，默认跟随系统</string>
+    <string name="appearance_system">跟随系统</string>
+    <string name="appearance_light">浅色</string>
+    <string name="appearance_dark">深色</string>
+    <string name="appearance_save_failed">外观设置保存失败</string>
 </resources>

@@ -57,6 +57,26 @@ class SettingsFragment : Fragment() {
         val root: View = binding.root
 
         val context = requireContext()
+        binding.appearanceValue.setText(AppearanceSettings.mode(context).label)
+        binding.appearanceLayout.setOnClickListener {
+            val modes = AppearanceSettings.Mode.entries
+            val selected = AppearanceSettings.mode(context)
+            MaterialAlertDialogBuilder(context)
+                .setTitle(R.string.appearance_title)
+                .setSingleChoiceItems(modes.map { getString(it.label) }.toTypedArray(),
+                    modes.indexOf(selected)) { dialog, index ->
+                    dialog.dismiss()
+                    if (modes[index] != selected) {
+                        if (AppearanceSettings.save(context, modes[index])) {
+                            AppearanceSettings.apply(context)
+                        } else {
+                            showToast(getString(R.string.appearance_save_failed))
+                        }
+                    }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
         binding.selinuxSwitch.isChecked = context.needOpenSELinux
         binding.selinuxSwitch.setOnCheckedChangeListener(object: CompoundButton.OnCheckedChangeListener {
             override fun onCheckedChanged(

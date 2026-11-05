@@ -29,7 +29,7 @@
             android:layout_marginTop="2dp"
             android:layout_marginBottom="10dp"
             android:text="@string/feature_group_desc"
-            android:textColor="@color/grey500"
+            android:textColor="@color/wechat_text_secondary"
             android:textSize="11sp" />
 
         <include

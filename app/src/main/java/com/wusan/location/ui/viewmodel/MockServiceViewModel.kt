@@ -25,6 +25,7 @@ import net.sf.geographiclib.Geodesic
 
 class MockServiceViewModel : ViewModel() {
     lateinit var rocker: Rocker
+    private var movementLoopsStarted = false
 
     var isRockerLocked = false
     var routeStage = 0
@@ -47,14 +48,21 @@ class MockServiceViewModel : ViewModel() {
     fun initRocker(activity: Activity): Rocker {
         if (!::rocker.isInitialized) {
             rocker = Rocker(activity)
+        } else {
+            rocker.refreshAppearance(activity)
         }
 
         // 这两个循环跑在 GlobalScope 里，以前只有“本地是否已经启动过”的判断。
         // 退出再进入 App（Activity 重建）时会再启动一整套，而旧的那套不会停，
         // 于是多个循环同时调用 move()，位移叠加 —— 这就是“速度设成 0.5 却跑得飞快”的原因。
         // 现在用全局引用保证任何时刻只有一套循环在跑。
-        startRockerLoop(activity)
-        startRouteLoop(activity)
+        if (!movementLoopsStarted || activeRockerJob?.isActive != true) {
+            startRockerLoop(activity)
+        }
+        if (!movementLoopsStarted || activeRouteJob?.isActive != true) {
+            startRouteLoop(activity)
+        }
+        movementLoopsStarted = true
 
         FakeLoc.speed = activity.speed
         FakeLoc.altitude = activity.altitude

@@ -20,6 +20,45 @@
             android:orientation="vertical">
 
             <LinearLayout
+                android:id="@+id/appearance_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="64dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="8dp">
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/appearance_title"
+                        android:textColor="@color/wechat_text_primary"
+                        android:textSize="16sp" />
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/appearance_desc"
+                        android:textColor="@color/wechat_text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/appearance_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:textColor="@color/wechat_text_primary"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/selinux_layout"
                 android:visibility="gone"
                 android:layout_width="match_parent"

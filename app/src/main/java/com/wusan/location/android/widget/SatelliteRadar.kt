@@ -67,7 +67,7 @@ class SatelliteRadarView(context: Context, attributeSet: AttributeSet): View(con
         initSensors(context)
 
         radarPoint.style = Paint.Style.STROKE
-        radarPoint.color = Color.BLACK
+        radarPoint.color = androidx.core.content.ContextCompat.getColor(context, com.wusan.location.R.color.wechat_text_primary)
 
         satellitePaint.style = Paint.Style.FILL
         satellitePaint.color = 0xFF2196F3.toInt() // 蓝色

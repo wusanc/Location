@@ -44,7 +44,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
-                android:textColor="@color/grey500"
+                android:textColor="@color/wechat_text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
 
@@ -54,7 +54,7 @@
             android:importantForAccessibility="no"
             android:rotation="-90"
             android:src="@drawable/baseline_keyboard_arrow_down_24"
-            app:tint="@color/grey500" />
+            app:tint="@color/wechat_text_secondary" />
     </LinearLayout>
 
 </com.google.android.material.card.MaterialCardView>

@@ -19,7 +19,7 @@ import com.wusan.location.ext.rockerCoords
 
 
 @SuppressLint("RtlHardcoded", "ClickableViewAccessibility")
-class Rocker(private val activity: Activity) : View.OnTouchListener {
+class Rocker(private var activity: Activity) : View.OnTouchListener {
     private val root by lazy {
         LayoutInflater.from(activity).inflate(R.layout.layout_rocker, null)!!
     }
@@ -99,6 +99,7 @@ class Rocker(private val activity: Activity) : View.OnTouchListener {
             } else {
                 root.findViewById<View>(R.id.auto_lock).setBackgroundResource(R.drawable.baseline_manual_24)
             }
+            tintControlIcon(root.findViewById(R.id.auto_lock))
             autoListener?.onAutoLock(autoLockStatus)
         }
     }
@@ -112,6 +113,7 @@ class Rocker(private val activity: Activity) : View.OnTouchListener {
                 .setBackgroundResource(R.drawable.baseline_play_24)
             upController()
         }
+        tintControlIcon(root.findViewById(R.id.auto_play))
         autoListener?.onAutoPlay(autoStatus)
         rockerView.auto(autoStatus)
     }
@@ -127,6 +129,39 @@ class Rocker(private val activity: Activity) : View.OnTouchListener {
         }
     }
     
+    private fun tintControlIcon(view: View) {
+        view.background?.mutate()?.let {
+            androidx.core.graphics.drawable.DrawableCompat.setTint(it,
+                androidx.core.content.ContextCompat.getColor(activity, R.color.wechat_text_primary))
+            view.background = it
+        }
+    }
+
+    /** Update an attached overlay without resetting its input or the running route. */
+    fun refreshAppearance(activity: Activity) {
+        this.activity = activity
+        val foreground = androidx.core.content.ContextCompat.getColor(activity, R.color.wechat_text_primary)
+        val surface = androidx.core.content.ContextCompat.getColor(activity, R.color.wechat_surface)
+        fun update(view: View) {
+            if (view is CardView) view.setCardBackgroundColor(surface)
+            if (view is android.widget.TextView) view.setTextColor(foreground)
+            if (view is android.widget.ImageView) {
+                androidx.core.widget.ImageViewCompat.setImageTintList(view,
+                    android.content.res.ColorStateList.valueOf(foreground))
+            }
+            if (view.id == R.id.auto_play || view.id == R.id.auto_lock) {
+                view.background?.mutate()?.let {
+                    androidx.core.graphics.drawable.DrawableCompat.setTint(it, foreground)
+                    view.background = it
+                }
+            }
+            if (view is android.view.ViewGroup) {
+                for (i in 0 until view.childCount) update(view.getChildAt(i))
+            }
+        }
+        update(root)
+    }
+
     fun show() {
         windowManager.addView(root, layoutParams)
         isStart = true

@@ -16,8 +16,8 @@
     <color name="wechat_divider">#E5E5E5</color>
     <!-- 文字三级 -->
     <color name="wechat_text_primary">#191919</color>
-    <color name="wechat_text_secondary">#7F7F7F</color>
-    <color name="wechat_text_hint">#B2B2B2</color>
+    <color name="wechat_text_secondary">#626B73</color>
+    <color name="wechat_text_hint">#626B73</color>
 
     <color name="primary">#FFFFFFFF</color>
     <color name="primary_dark">#FFFFFFFF</color>
@@ -74,4 +74,9 @@
     <color name="white">#FFFFFFFF</color>
     <color name="colorPrimary">#07C160</color>
     <color name="colorPrimaryDark">#06AD56</color>
+    <color name="wechat_action">#087F41</color>
+    <color name="wechat_on_action">#FFFFFF</color>
+    <color name="wechat_input_bg">#F4F5F6</color>
+    <color name="search_panel_background">#F5FFFFFF</color>
+    <color name="map_control_background">#F5FFFFFF</color>
 </resources>

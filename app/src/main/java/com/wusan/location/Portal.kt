@@ -7,11 +7,13 @@ import com.baidu.mapapi.CoordType
 import com.baidu.mapapi.SDKInitializer
 import com.tencent.bugly.crashreport.CrashReport
 import com.wusan.location.android.Bugly
+import com.wusan.location.ui.settings.AppearanceSettings
 
 class Portal: Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppearanceSettings.apply(this)
 
         SDKInitializer.setAgreePrivacy(this, true)
         LocationClient.setAgreePrivacy(true)

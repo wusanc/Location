@@ -16,8 +16,6 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
@@ -78,6 +76,7 @@ import com.wusan.location.databinding.ActivityMainBinding
 import com.wusan.location.ext.gcj02
 import com.wusan.location.ext.wgs84
 import com.wusan.location.ui.notification.NotificationUtils
+import com.wusan.location.ui.settings.AppearanceSettings
 import com.wusan.location.ui.viewmodel.BaiduMapViewModel
 import com.wusan.location.ui.viewmodel.MockServiceViewModel
 
@@ -150,7 +149,9 @@ class MainActivity : AppCompatActivity() {
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.isAppearanceLightStatusBars = true // 浅色顶栏，状态栏用深色图标
+        controller.isAppearanceLightStatusBars = !AppearanceSettings.isDark(this)
+        controller.isAppearanceLightNavigationBars = !AppearanceSettings.isDark(this)
+        window.navigationBarColor = ContextCompat.getColor(this, R.color.wechat_nav_bg)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
@@ -191,10 +192,6 @@ class MainActivity : AppCompatActivity() {
                 setupActionBarWithNavController(navController, appBarConfiguration)
                 bottomNav.setupWithNavController(navController)
 
-                binding.appBarMain.toolbar.navigationIcon?.colorFilter = PorterDuffColorFilter(
-                    ContextCompat.getColor(this@MainActivity, R.color.theme_appbar_icon_color), PorterDuff.Mode.SRC_IN
-                )
-
                 navController.addOnDestinationChangedListener(object: OnDestinationChangedListener {
                     override fun onDestinationChanged(
                         controller: NavController,
@@ -204,6 +201,11 @@ class MainActivity : AppCompatActivity() {
                         // 进入功能子页面时收起底部栏，让子页面全屏显示。
                         bottomNav.visibility =
                             if (destination.id in topLevelDestinations) View.VISIBLE else View.GONE
+                        // NavigationUI replaces the icon on every destination change. Use the
+                        // themed vector here; MaterialToolbar applies its tint on every assignment.
+                        if (destination.id !in topLevelDestinations) {
+                            supportActionBar?.setHomeAsUpIndicator(R.drawable.baseline_arrow_back_24)
+                        }
 
                         binding.searchLinear.visibility = View.GONE
                         binding.appBarMain.toolbar.menu

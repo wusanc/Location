@@ -46,7 +46,7 @@
                         android:text="@string/none"
                         android:textStyle="bold"
                         android:textAppearance="@style/TextAppearance.AppCompat.Title"
-                        android:textColor="@color/black"/>
+                        android:textColor="@color/wechat_text_primary"/>
 
                     <TextView
                         android:id="@+id/mock_location_address"
@@ -54,7 +54,7 @@
                         android:layout_height="wrap_content"
                         android:text="@string/none_none"
                         android:textAppearance="@style/TextAppearance.AppCompat.Body1"
-                        android:textColor="@color/black"/>
+                        android:textColor="@color/wechat_text_primary"/>
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -67,7 +67,7 @@
                             android:layout_height="wrap_content"
                             android:text="@string/latlon_display"
                             android:textAppearance="@style/TextAppearance.AppCompat.Body2"
-                            android:textColor="@color/black"/>
+                            android:textColor="@color/wechat_text_primary"/>
 
                         <TextView
                             android:id="@+id/mock_location_latlon"
@@ -96,7 +96,7 @@
                             android:id="@+id/switch_mock"
                             android:layout_width="wrap_content"
                             android:layout_height="28dp"
-                            android:textColor="@color/white"
+                            android:textColor="@color/wechat_on_action"
                             android:text="@string/start_mock"
                             style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
                             android:insetRight="0dp"
@@ -108,7 +108,7 @@
                             app:iconGravity="textStart"
                             app:iconPadding="0dp"
                             android:padding="6dp"
-                            app:iconTint="@color/white"
+                            app:iconTint="@color/wechat_on_action"
                             app:cornerRadius="12dp"/>
 
                     </LinearLayout>
@@ -173,7 +173,7 @@
         android:contentDescription="@string/follow_location"
         app:srcCompat="@drawable/sharp_location_off_24"
         android:backgroundTint="@color/wechat_green"
-        android:tint="@color/white"
+        android:tint="@color/wechat_on_action"
         app:fabSize="auto"
         android:visibility="gone"
         android:layout_gravity="bottom|end"/>
