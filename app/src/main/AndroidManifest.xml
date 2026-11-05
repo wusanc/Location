@@ -55,6 +55,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Read-only step settings; no location or main preferences are exposed. -->
+        <provider
+            android:name=".service.StepConfigProvider"
+            android:authorities="com.wusan.location.stepconfig"
+            android:grantUriPermissions="true"
+            android:exported="true" />
+        <receiver
+            android:name=".service.StepConfigAccessReceiver"
+            android:exported="true" />
+
         <!-- 百度地图定位服务 -->
         <service
             android:name="com.baidu.location.f"

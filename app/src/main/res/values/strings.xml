@@ -84,4 +84,13 @@
     <string name="zero">0 G</string>
     <string name="in_view_left_item">可用卫星数量</string>
     <string name="in_use_satellite">在用卫星数量</string>
+    <string name="step_simulation_title">步频模拟</string>
+    <string name="step_simulation_desc">仅作用于 LSPosed 中勾选并重启的应用；开启后独立于路线运行</string>
+    <string name="step_cadence_title">步频</string>
+    <string name="step_cadence_value">%1$d 步/分钟</string>
+    <string name="step_cadence_desc">固定步频；支持计步器与单步检测传感器</string>
+    <string name="step_cadence_input">设置步频（1～300 步/分钟）</string>
+    <string name="step_cadence_invalid">请输入 1～300 的整数</string>
+    <string name="step_settings_failed">步频配置保存失败</string>
+    <string name="step_settings_saved">已保存，约 1 秒后生效</string>
 </resources>

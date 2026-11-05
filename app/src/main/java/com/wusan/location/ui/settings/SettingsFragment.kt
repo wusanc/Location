@@ -33,6 +33,7 @@ import com.wusan.location.ext.needOpenSELinux
 import com.wusan.location.ext.reportDuration
 import com.wusan.location.ext.speed
 import com.wusan.location.service.MockServiceHelper
+import com.wusan.location.service.StepSimulationSettings
 import com.wusan.location.ui.viewmodel.MockServiceViewModel
 import com.wusan.location.ui.viewmodel.SettingsViewModel
 import kotlin.getValue
@@ -193,6 +194,38 @@ class SettingsFragment : Fragment() {
                 updateRemoteConfig()
             }
         })
+
+        val stepConfig = StepSimulationSettings.read(context)
+        binding.stepSimulationSwitch.isChecked = stepConfig.enabled
+        binding.stepCadenceValue.text = getString(R.string.step_cadence_value, stepConfig.cadence)
+        var updatingStepSwitch = false
+        binding.stepSimulationSwitch.setOnCheckedChangeListener { button, enabled ->
+            if (updatingStepSwitch) return@setOnCheckedChangeListener
+            val current = StepSimulationSettings.read(context)
+            if (!StepSimulationSettings.save(context, current.copy(enabled = enabled))) {
+                updatingStepSwitch = true
+                button.isChecked = current.enabled
+                updatingStepSwitch = false
+                showToast(getString(R.string.step_settings_failed))
+            } else {
+                showToast(getString(R.string.step_settings_saved))
+            }
+        }
+        binding.stepCadenceLayout.setOnClickListener {
+            val current = StepSimulationSettings.read(context)
+            showDialog(getString(R.string.step_cadence_input), current.cadence.toString()) { text ->
+                val cadence = text.toIntOrNull()
+                if (cadence == null || cadence !in 1..300) {
+                    showToast(getString(R.string.step_cadence_invalid))
+                } else if (!StepSimulationSettings.save(context,
+                        StepSimulationSettings.read(context).copy(cadence = cadence))) {
+                    showToast(getString(R.string.step_settings_failed))
+                } else {
+                    binding.stepCadenceValue.text = getString(R.string.step_cadence_value, cadence)
+                    showToast(getString(R.string.step_settings_saved))
+                }
+            }
+        }
 
         binding.sensorHookSwitch.isChecked = context.hookSensor
         binding.sensorHookSwitch.setOnCheckedChangeListener(object: CompoundButton.OnCheckedChangeListener {

@@ -12,6 +12,7 @@ import moe.wusan.xposed.hooks.fused.ThirdPartyLocationHook
 import moe.wusan.xposed.hooks.oplus.OplusLocationHook
 import moe.wusan.xposed.hooks.telephony.miui.MiuiTelephonyManagerHook
 import moe.wusan.xposed.hooks.sensor.SystemSensorManagerHook
+import moe.wusan.xposed.hooks.sensor.StepSensorHook
 import moe.wusan.xposed.hooks.telephony.TelephonyHook
 import moe.wusan.xposed.hooks.wlan.WlanHook
 import moe.wusan.xposed.utils.FakeLoc
@@ -47,7 +48,12 @@ class FakeLocation: IXposedHookLoadPackage, IXposedHookZygoteInit {
      * @throws Throwable Everything the callback throws is caught and logged.
      */
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam?) {
-        if (lpparam?.packageName != "android" && lpparam?.packageName != "com.android.phone") {
+        if (lpparam == null) return
+        if (lpparam.packageName != "android" && lpparam.packageName != "com.android.phone") {
+            // LSPosed supplies only packages explicitly included in the module scope.
+            // SensorEvent callbacks live in client apps, rather than in system_server.
+            runCatching { StepSensorHook.install(lpparam.classLoader) }
+                .onFailure { Logger.warn("Step sensor hook unavailable in ${lpparam.packageName}", it) }
             return
         }
 
