@@ -106,8 +106,8 @@ class MockFragment : Fragment() {
                     if (checkedTextView.isChecked) {
                         rocker.show()
                     } else {
+                        stopMovement()
                         rocker.hide()
-                        rockerCoroutineController.pause()
                     }
                 }
             }
@@ -157,6 +157,7 @@ class MockFragment : Fragment() {
                 binding.mockLocationName.text = loc.name
                 binding.mockLocationAddress.text = loc.address
                 binding.mockLocationLatlon.text = loc.lat.toString().take(8) + ", " + loc.lon.toString().take(8)
+                mockServiceViewModel.stopMovement()
                 mockServiceViewModel.selectedLocation = loc
                 requireContext().selectLocation = loc
 
@@ -167,10 +168,9 @@ class MockFragment : Fragment() {
                 }
 
                 if (MockServiceHelper.isMockStart(mockServiceViewModel.locationManager!!)) {
-                    if (MockServiceHelper.setLocation(mockServiceViewModel.locationManager!!, loc.lat, loc.lon)) {
-                        Toast.makeText(requireContext(), "位置更新成功", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(requireContext(), "更新位置失败", Toast.LENGTH_SHORT).show()
+                    lifecycleScope.launch {
+                        val success = mockServiceViewModel.placeLocation(loc.lat, loc.lon)
+                        showToast(if (success) "位置更新成功" else "更新位置失败")
                     }
                 }
             }
@@ -298,6 +298,7 @@ class MockFragment : Fragment() {
                         return@withContext false
                     }
                 }
+                if (isClosed) mockServiceViewModel.stopMovement()
                 if (isClosed && mockServiceViewModel.rocker.isStart) {
                     binding.rocker.isClickable = false
                     binding.rocker.toggle()

@@ -264,8 +264,8 @@ class SettingsFragment : Fragment() {
                 it.substring(0, it.length - 2)
             }) {
                 val value = it.toIntOrNull()
-                if (value == null || value < 0) {
-                    Toast.makeText(context, "上报间隔不合法", Toast.LENGTH_SHORT).show()
+                if (value == null || value < 20) {
+                    Toast.makeText(context, "上报间隔不能小于20ms", Toast.LENGTH_SHORT).show()
                     return@showDialog
                 } else if (value > 1000) {
                     Toast.makeText(context, "上报间隔不能大于1s", Toast.LENGTH_SHORT).show()
@@ -273,7 +273,7 @@ class SettingsFragment : Fragment() {
                 }
                 context.reportDuration = value
                 binding.reportDurationValue.text = "%dms".format(value)
-                showToast("保存成功，重启 APP 后生效")
+                showToast("保存成功，下一更新周期生效")
             }
         }
 

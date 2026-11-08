@@ -908,12 +908,13 @@ internal object LocationServiceHook: BaseLocationHook() {
     }
 
     fun callOnLocationChanged() {
+        if (!FakeLoc.enable) return
         if (FakeLoc.enableDebugLog) {
             Logger.debug("==> callOnLocationChanged: ${locationListeners.size}")
         }
         locationListeners.forEach { listenerWithProvider ->
             val listener = listenerWithProvider.second
-            var location = FakeLoc.lastLocation
+            var location = FakeLoc.lastLocation?.let { Location(it) }
             if (location == null) {
                 location = if (listenerWithProvider.first == "GnssBatch") {
                     Location("gps")
@@ -921,7 +922,7 @@ internal object LocationServiceHook: BaseLocationHook() {
                     Location(listenerWithProvider.first)
                 }
             }
-            location = injectLocation(location)
+            location = injectLocation(location, realLocation = false)
             var called = false
             var error: Throwable? = null
             kotlin.runCatching {

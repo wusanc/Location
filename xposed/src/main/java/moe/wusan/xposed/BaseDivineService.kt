@@ -104,6 +104,12 @@ abstract class BaseDivineService {
             FakeLoc.altitude = rely.getDouble("altitude", FakeLoc.altitude)
             FakeLoc.speed = rely.getDouble("speed", FakeLoc.speed)
             FakeLoc.speedAmplitude = rely.getDouble("speed_amplitude", FakeLoc.speedAmplitude)
+            FakeLoc.motion = FakeLoc.Motion(
+                rely.getDouble("actual_speed", 0.0),
+                rely.getLong("motion_at_nanos", 0L),
+                rely.getBoolean("route_motion", false),
+                rely.getLong("motion_at_millis", 0L),
+            )
             FakeLoc.hasBearings = rely.getBoolean("has_bearings", FakeLoc.hasBearings)
             FakeLoc.bearing = rely.getDouble("bearing", FakeLoc.bearing)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

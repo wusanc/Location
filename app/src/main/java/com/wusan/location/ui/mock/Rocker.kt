@@ -87,7 +87,6 @@ class Rocker(private var activity: Activity) : View.OnTouchListener {
         
         root.findViewById<View>(R.id.auto_play).setOnClickListener {
             autoStatus = !autoStatus
-            playAuto(rockerView)
         }
         root.findViewById<View>(R.id.auto_status).setOnClickListener {
 
@@ -163,15 +162,28 @@ class Rocker(private var activity: Activity) : View.OnTouchListener {
     }
 
     fun show() {
+        if (isStart) return
         windowManager.addView(root, layoutParams)
         isStart = true
     }
 
+    fun resetInput() {
+        root.findViewById<RockerView>(R.id.rocker).reset()
+    }
+
     fun hide() {
-        val rockerView = root.findViewById<RockerView>(R.id.rocker)
-        rockerView.reset()
+        if (!isStart) return
+        resetInput()
         windowManager.removeView(root)
         isStart = false
+    }
+
+    fun dispose() {
+        autoListener = null
+        root.findViewById<RockerView>(R.id.rocker).listener = null
+        hide()
+        resetInput()
+        root.setOnTouchListener(null)
     }
 
     fun savePosition() {

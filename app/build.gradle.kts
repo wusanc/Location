@@ -64,6 +64,7 @@ android {
 }
 
 dependencies {
+    testImplementation(libs.junit)
     implementation(project(":xposed"))
 
     implementation(libs.androidx.core.ktx)

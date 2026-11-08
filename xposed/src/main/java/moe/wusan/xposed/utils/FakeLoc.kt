@@ -1,6 +1,7 @@
 package moe.wusan.xposed.utils
 
 import android.location.Location
+import android.os.SystemClock
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -103,13 +104,24 @@ object FakeLoc {
 
     @Volatile var speed = 3.05
 
-    /**
-     * 最近一次位置被移动的时间戳（毫秒）。
-     *
-     * 上报 [Location.getSpeed] 时需要区分"正在移动"和"定点模拟"：
-     * 移动中才报设定速度，静止时报 0，否则会出现"人没动却在跑"的破绽。
-     */
-    @Volatile var lastMoveAt = 0L
+    /** Actual movement is independent of the configured target speed. */
+    data class Motion(
+        val speed: Double = 0.0,
+        val atNanos: Long = 0,
+        val route: Boolean = false,
+        val atMillis: Long = 0,
+    ) {
+        fun isFresh(nowNanos: Long): Boolean = nowNanos - atNanos in 0L until 2_000_000_000L
+
+        fun timestamp(nowNanos: Long, nowMillis: Long): Pair<Long, Long> =
+            if (route && isFresh(nowNanos)) atNanos to atMillis else nowNanos to nowMillis
+    }
+    @Volatile var motion = Motion()
+
+    fun reportedSpeed(nowNanos: Long = SystemClock.elapsedRealtimeNanos()): Double {
+        val sample = motion
+        return if (enable && sample.isFresh(nowNanos)) sample.speed else 0.0
+    }
 
     var speedAmplitude = 0.2
 

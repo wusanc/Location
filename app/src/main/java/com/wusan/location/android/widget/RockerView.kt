@@ -321,6 +321,9 @@ class RockerView(context: Context, attributeSet: AttributeSet): View(context, at
     }
 
     fun reset() {
+        lockRunnable?.let { handler.removeCallbacks(it) }
+        lockRunnable = null
+        isAuto.set(false)
         // joystick back to center
         mRockerPosition = Point()
         isLocked.set(false)

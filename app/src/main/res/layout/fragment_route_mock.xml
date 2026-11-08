@@ -104,40 +104,54 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
+                    android:orientation="vertical"
                     android:layout_marginTop="4dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/rocker_speed"
-                        android:textSize="12sp"
-                        android:textColor="@color/portal_mini_title_color" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/route_pace_title"
+                            android:textSize="14sp"
+                            android:textColor="@color/portal_mini_title_color" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/route_pace_value"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:textAllCaps="false"
+                            android:textSize="16sp"
+                            android:textColor="@color/wechat_text_primary" />
+                    </LinearLayout>
 
                     <com.google.android.material.slider.Slider
-                        android:id="@+id/route_speed_slider"
-                        android:layout_width="0dp"
+                        android:id="@+id/route_pace_slider"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:stepSize="0.5"
-                        android:valueFrom="0.5"
-                        android:valueTo="50.0"
+                        android:contentDescription="@string/route_pace_title"
+                        android:stepSize="1"
+                        android:valueFrom="20"
+                        android:valueTo="2000"
+                        android:value="300"
                         app:tickVisible="false"
                         app:thumbElevation="2dp"
-                        android:padding="0dp"
-                        app:thumbHeight="8dp"
-                        app:thumbRadius="4dp"
                         app:trackHeight="4dp" />
 
                     <TextView
-                        android:id="@+id/route_speed_value"
-                        android:layout_width="wrap_content"
+                        android:id="@+id/route_pace_hint"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:text="@string/route_pace_hint"
                         android:textSize="12sp"
-                        android:textColor="@color/wechat_text_primary"
-                        android:minWidth="60dp"
-                        android:gravity="end" />
+                        android:textColor="@color/wechat_text_secondary" />
 
                 </LinearLayout>
 

@@ -72,9 +72,9 @@ var Context.jsonHistoricalRoutes: String
     }
 
 var Context.reportDuration: Int
-    get() = sharedPrefs.getInt("reportDuration", 100)
+    get() = sharedPrefs.getInt("reportDuration", 100).coerceIn(20, 1000)
     set(value) = sharedPrefs.edit {
-        putInt("reportDuration", value)
+        putInt("reportDuration", value.coerceIn(20, 1000))
     }
 
 var Context.minSatelliteCount: Int
@@ -260,5 +260,3 @@ var Context.loopBroadcastlocation: Boolean
         putBoolean("loopBroadcastLocation", value)
         FakeLoc.loopBroadcastLocation = value
     }
-
-

@@ -29,8 +29,7 @@ object MockServiceHelper {
     const val PROVIDER_NAME = "portal"
     private lateinit var randomKey: String
 
-    private var loopThread :Thread ?= null
-    @Volatile private var isRunning = false
+    @Volatile private var loopThread: Thread? = null
 
     fun tryInitService(locationManager: LocationManager) {
         val rely = Bundle()
@@ -38,7 +37,7 @@ object MockServiceHelper {
         if(locationManager.sendExtraCommand(PROVIDER_NAME, "exchange_key", rely)) {
             rely.getString("key")?.let {
                 randomKey = it
-                Log.d("MockServiceHelper", "Service init success, key: $randomKey")
+                Log.d("MockServiceHelper", "Service init success")
             }
         } else {
             Log.e("MockServiceHelper", "Failed to init service")
@@ -131,12 +130,10 @@ object MockServiceHelper {
         rely.putDouble("speed", speed)
         rely.putDouble("altitude", altitude)
         rely.putFloat("accuracy", accuracy)
-        startLoopBroadcastLocation(locationManager)
-        return if(locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, rely)) {
+        val started = locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, rely) &&
             isMockStart(locationManager)
-        } else {
-            false
-        }
+        if (started) startLoopBroadcastLocation(locationManager)
+        return started
     }
 
     fun tryCloseMock(locationManager: LocationManager): Boolean {
@@ -277,6 +274,33 @@ object MockServiceHelper {
         return locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, rely)
     }
 
+    fun routeStep(
+        locationManager: LocationManager,
+        position: Pair<Double, Double>,
+        speed: Double,
+        bearing: Double?,
+        sampleNanos: Long,
+        sampleMillis: Long,
+    ): Boolean {
+        if (!::randomKey.isInitialized) return false
+        val packet = Bundle().apply {
+            putString("command_id", "route_step")
+            putDouble("lat", position.first)
+            putDouble("lon", position.second)
+            putDouble("actual_speed", speed)
+            putLong("sample_nanos", sampleNanos)
+            putLong("sample_millis", sampleMillis)
+            bearing?.let { putDouble("bearing", it) }
+        }
+        return locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, packet)
+    }
+
+    fun stopMotion(locationManager: LocationManager): Boolean {
+        if (!::randomKey.isInitialized) return false
+        val packet = Bundle().apply { putString("command_id", "stop_motion") }
+        return locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, packet)
+    }
+
     fun setLocation(locationManager: LocationManager, lat: Double, lon: Double): Boolean {
         return updateLocation(locationManager, lat, lon, "=")
     }
@@ -348,37 +372,37 @@ object MockServiceHelper {
     }
 
 
-    private fun startLoopBroadcastLocation(locationManager: LocationManager){
+    @Synchronized
+    private fun startLoopBroadcastLocation(locationManager: LocationManager) {
         val appContext = Portal.appContext
-        val delayTime=appContext.reportDuration.toLong()
-
-        if(isRunning) return
-        if(!appContext.loopBroadcastlocation) return
-
-        isRunning=true
-        loopThread=Thread{
-            Log.d("MockServiceHelper","loopBoardcast: Start")
-            while(isRunning){
-                try {
+        if (loopThread?.isAlive == true || !appContext.loopBroadcastlocation) return
+        val worker = Thread({
+            val self = Thread.currentThread()
+            try {
+                while (loopThread === self && !self.isInterrupted) {
                     broadcastLocation(locationManager)
-                    Thread.sleep(delayTime)
-                }catch (e:InterruptedException){
-                    if (FakeLoc.enableDebugLog) {
-                        Log.d("MockServiceHelper","loopBoardcast: Stop")
-                    }
-                    break
+                    Thread.sleep(appContext.reportDuration.toLong())
+                }
+            } catch (_: InterruptedException) {
+                self.interrupt()
+            } catch (e: Exception) {
+                Log.e("MockServiceHelper", "Location broadcast stopped", e)
+            } finally {
+                synchronized(this) {
+                    if (loopThread === self) loopThread = null
                 }
             }
-        }
-        loopThread!!.start()
+        }, "location-broadcast")
+        loopThread = worker
+        worker.start()
     }
 
-    private fun stopLoopBroadcastLocation(){
-        isRunning =false
-        loopThread?.interrupt()
+    @Synchronized
+    private fun stopLoopBroadcastLocation() {
+        val worker = loopThread
         loopThread = null
+        worker?.interrupt()
     }
-
 
     @SuppressLint("DiscouragedPrivateApi")
     fun loadPortalLibrary(context: Context): Boolean {

@@ -4,6 +4,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import de.robv.android.xposed.XposedHelpers
 import moe.wusan.xposed.utils.FakeLoc
 import moe.wusan.xposed.utils.Logger
@@ -29,45 +30,39 @@ abstract class BaseLocationHook: BaseDivineService() {
         if (!FakeLoc.enable)
             return originLocation
 
-        if (originLocation.latitude + originLocation.longitude == FakeLoc.latitude + FakeLoc.longitude) {
-            // Already processed
-            return originLocation
-        }
-
         if (FakeLoc.disableNetworkLocation && originLocation.provider == LocationManager.NETWORK_PROVIDER) {
             originLocation.provider = LocationManager.GPS_PROVIDER
         }
 
         val location = Location(originLocation.provider ?: LocationManager.GPS_PROVIDER)
         location.accuracy = if (FakeLoc.accuracy != 0.0f) FakeLoc.accuracy else originLocation.accuracy
-        val jitterLat = FakeLoc.jitterLocation()
-        location.latitude = jitterLat.first
-        location.longitude = jitterLat.second
+        val sampleTime = synchronized(FakeLoc) {
+            val nowNanos = SystemClock.elapsedRealtimeNanos()
+            val nowMillis = System.currentTimeMillis()
+            val motion = FakeLoc.motion
+            // Route points are exact: independent noise on tiny displacements creates speed spikes.
+            val point = if (FakeLoc.motion.route) FakeLoc.latitude to FakeLoc.longitude
+                else FakeLoc.jitterLocation()
+            location.latitude = point.first
+            location.longitude = point.second
+            location.speed = FakeLoc.reportedSpeed(nowNanos).toFloat()
+            location.bearing = ((FakeLoc.bearing % 360.0 + 360.0) % 360.0).toFloat()
+            // Repeated callbacks for one route sample keep its position and time together.
+            motion.timestamp(nowNanos, nowMillis)
+        }
         location.altitude = FakeLoc.altitude
-        val speedAmp = Random.nextDouble(-FakeLoc.speedAmplitude, FakeLoc.speedAmplitude)
-        // 上报速度要跟模拟速度一致：之前用的是真机 GPS 速度，导致目标应用显示的配速
-        // 和设置里的速度完全无关。这里按"最近 2 秒内是否移动过"来区分移动/静止。
-        val moving = System.currentTimeMillis() - FakeLoc.lastMoveAt < 2000L
-        location.speed = ((if (moving) FakeLoc.speed else 0.0) + speedAmp)
-            .coerceAtLeast(0.0)
-            .toFloat()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && originLocation.hasSpeedAccuracy()) {
-            location.speedAccuracyMetersPerSecond = (FakeLoc.speed + speedAmp).toFloat()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            location.speedAccuracyMetersPerSecond = 0.1f
         }
 
         if (location.altitude == 0.0) {
             location.altitude = 80.0
         }
 
-        location.time = originLocation.time
+        // Use the simulation sample's clock, never the cached real GPS template's clock.
+        location.time = sampleTime.second
 
-        // final addition of zero is to remove -0 results. while these are technically within the
-        // range [0, 360) according to IEEE semantics, this eliminates possible user confusion.
-        var modBearing = FakeLoc.bearing % 360.0 + 0.0
-        if (modBearing < 0) {
-            modBearing += 360.0
-        }
-        location.bearing = modBearing.toFloat()
+        val modBearing = location.bearing.toDouble()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             location.bearingAccuracyDegrees = modBearing.toFloat()
         }
@@ -77,11 +72,7 @@ abstract class BaseLocationHook: BaseDivineService() {
             }
         }
 
-        if (location.speed == 0.0f) {
-            location.speed = 1.2f
-        }
-
-        location.elapsedRealtimeNanos = originLocation.elapsedRealtimeNanos
+        location.elapsedRealtimeNanos = sampleTime.first
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             location.elapsedRealtimeUncertaintyNanos = originLocation.elapsedRealtimeUncertaintyNanos
         }

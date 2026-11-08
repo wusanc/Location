@@ -4,9 +4,11 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Parcel
+import android.os.SystemClock
 import moe.wusan.dobby.Dobby
 import moe.wusan.xposed.hooks.LocationServiceHook
 import moe.wusan.xposed.utils.FakeLoc
+import moe.wusan.xposed.utils.RouteSampleClock
 import moe.wusan.xposed.utils.BinderUtils
 import moe.wusan.xposed.utils.Logger
 import java.util.Collections
@@ -14,7 +16,7 @@ import kotlin.random.Random
 
 object RemoteCommandHandler {
     private val proxyBinders by lazy { Collections.synchronizedList(arrayListOf<IBinder>()) }
-    private val needProxyCmd = arrayOf("start", "stop", "set_speed_amp", "set_altitude", "set_speed", "update_location", "set_bearing", "move", "put_config")
+    private val needProxyCmd = arrayOf("start", "stop", "set_speed_amp", "set_altitude", "set_speed", "update_location", "set_bearing", "move", "put_config", "route_step", "stop_motion")
     internal val randomKey by lazy { "portal_" + Random.nextDouble() }
     private var isLoadedLibrary = false
 
@@ -66,6 +68,7 @@ object RemoteCommandHandler {
                 val altitude = rely.getDouble("altitude", FakeLoc.altitude)
                 val accuracy = rely.getFloat("accuracy", FakeLoc.accuracy)
 
+                FakeLoc.motion = FakeLoc.Motion()
                 FakeLoc.enable = true
                 if (isLoadedLibrary) {
                     Dobby.setStatus(true)
@@ -79,6 +82,7 @@ object RemoteCommandHandler {
             }
             "stop" -> {
                 FakeLoc.enable = false
+                FakeLoc.motion = FakeLoc.Motion()
                 FakeLoc.hasBearings = false
                 if (isLoadedLibrary) {
                     Dobby.setStatus(false)
@@ -114,8 +118,10 @@ object RemoteCommandHandler {
                 return true
             }
             "get_location" -> {
-                rely.putDouble("lat", FakeLoc.latitude)
-                rely.putDouble("lon", FakeLoc.longitude)
+                synchronized(FakeLoc) {
+                    rely.putDouble("lat", FakeLoc.latitude)
+                    rely.putDouble("lon", FakeLoc.longitude)
+                }
                 return true
             }
             "get_listener_size" -> {
@@ -157,7 +163,11 @@ object RemoteCommandHandler {
             }
             "move" -> {
                 val distance = rely.getDouble("n", 0.0)
-                if (distance == 0.0) return true
+                if (!FakeLoc.enable || !distance.isFinite() || distance < 0) return false
+                if (distance == 0.0) {
+                    FakeLoc.motion = FakeLoc.motion.copy(speed = 0.0)
+                    return true
+                }
                 val bearing = rely.getDouble("bearing", 0.0)
                 val newLoc = FakeLoc.moveLocation(
                     n = distance,
@@ -168,9 +178,44 @@ object RemoteCommandHandler {
                 }
                 FakeLoc.bearing = bearing
                 FakeLoc.hasBearings = true
-                return updateCoordinate(newLoc.first, newLoc.second).also {
+                return updateCoordinate(newLoc.first, newLoc.second,
+                    FakeLoc.speed.takeIf { it.isFinite() && it >= 0 } ?: 0.0).also {
                     if (FakeLoc.isSystemServerProcess) LocationServiceHook.callOnLocationChanged()
                 }
+            }
+            "route_step" -> {
+                if (!FakeLoc.enable) return false
+                val lat = rely.getDouble("lat", Double.NaN)
+                val lon = rely.getDouble("lon", Double.NaN)
+                val speed = rely.getDouble("actual_speed", Double.NaN)
+                val bearing = if (rely.containsKey("bearing")) rely.getDouble("bearing") else null
+                if (lat !in -90.0..90.0 || lon !in -180.0..180.0 ||
+                    !speed.isFinite() || speed < 0 || bearing?.isFinite() == false) return false
+                val sampleTime = RouteSampleClock.resolve(
+                    rely.getLong("sample_nanos"), rely.getLong("sample_millis"),
+                    SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis(),
+                )
+                synchronized(FakeLoc) {
+                    bearing?.let {
+                        FakeLoc.bearing = it
+                        FakeLoc.hasBearings = true
+                    }
+                    updateCoordinate(lat, lon, speed, route = true,
+                        atNanos = sampleTime.nanos, atMillis = sampleTime.millis)
+                }
+                if (FakeLoc.isSystemServerProcess) LocationServiceHook.callOnLocationChanged()
+                return true
+            }
+            "stop_motion" -> {
+                synchronized(FakeLoc) {
+                    FakeLoc.motion = FakeLoc.motion.copy(
+                        speed = 0.0,
+                        atNanos = SystemClock.elapsedRealtimeNanos(),
+                        atMillis = System.currentTimeMillis(),
+                    )
+                }
+                if (FakeLoc.enable && FakeLoc.isSystemServerProcess) LocationServiceHook.callOnLocationChanged()
+                return true
             }
             "update_location" -> {
                 val mode = rely.getString("mode")
@@ -252,6 +297,11 @@ object RemoteCommandHandler {
                 rely.putDouble("altitude", FakeLoc.altitude)
                 rely.putDouble("speed", FakeLoc.speed)
                 rely.putDouble("speed_amplitude", FakeLoc.speedAmplitude)
+                val motion = FakeLoc.motion
+                rely.putDouble("actual_speed", motion.speed)
+                rely.putLong("motion_at_nanos", motion.atNanos)
+                rely.putLong("motion_at_millis", motion.atMillis)
+                rely.putBoolean("route_motion", motion.route)
                 rely.putBoolean("has_bearings", FakeLoc.hasBearings)
                 rely.putDouble("bearing", FakeLoc.bearing)
                 rely.putParcelable("last_location", FakeLoc.lastLocation)
@@ -317,16 +367,25 @@ object RemoteCommandHandler {
 //        return LocationServiceProxyHook.injectLocation(location, realLocation)
 //    }
 
-    private fun updateCoordinate(newLat: Double, newLon: Double): Boolean {
-        if (newLat in -90.0..90.0 && newLon in -180.0..180.0) {
-            FakeLoc.latitude = newLat
-            FakeLoc.longitude = newLon
-            // 记录移动时间，供上报速度判断"是否正在移动"
-            FakeLoc.lastMoveAt = System.currentTimeMillis()
-            return true
-        } else {
+    private fun updateCoordinate(
+        newLat: Double,
+        newLon: Double,
+        speed: Double = 0.0,
+        route: Boolean = false,
+        atNanos: Long = SystemClock.elapsedRealtimeNanos(),
+        atMillis: Long = System.currentTimeMillis(),
+    ): Boolean {
+        if (newLat !in -90.0..90.0 || newLon !in -180.0..180.0) {
             Logger.error("Invalid latitude or longitude: $newLat, $newLon")
             return false
         }
+        synchronized(FakeLoc) {
+            FakeLoc.latitude = newLat
+            FakeLoc.longitude = newLon
+            FakeLoc.motion = FakeLoc.Motion(
+                speed, atNanos, route, atMillis,
+            )
+        }
+        return true
     }
 }

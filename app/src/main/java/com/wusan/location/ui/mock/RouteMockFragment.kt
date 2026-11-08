@@ -8,6 +8,11 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.slider.Slider
+import com.wusan.location.databinding.DialogRoutePaceBinding
+import java.util.Locale
 import android.view.animation.DecelerateInterpolator
 import android.widget.CheckedTextView
 import android.widget.Toast
@@ -47,6 +52,7 @@ import androidx.navigation.findNavController
 class RouteMockFragment : Fragment() {
     private var _binding: FragmentRouteMockBinding? = null
     private val binding get() = _binding!!
+    private var paceDialog: AlertDialog? = null
 
     private val routeMockViewModel by viewModels<HomeViewModel>()
     private val mockServiceViewModel by activityViewModels<MockServiceViewModel>()
@@ -98,8 +104,8 @@ class RouteMockFragment : Fragment() {
                     if (checkedTextView.isChecked) {
                         rocker.show()
                     } else {
+                        stopMovement()
                         rocker.hide()
-                        rockerCoroutineController.pause()
                     }
                 }
             }
@@ -146,23 +152,24 @@ class RouteMockFragment : Fragment() {
             mockServiceViewModel.selectedRoute = it
         }
 
-        val currentSpeed = requireContext().speed
-        val snappedSpeed = (currentSpeed / 0.5).toInt() * 0.5
-        binding.routeSpeedSlider.value = snappedSpeed.toFloat().coerceIn(0.5f, 50f)
-        binding.routeSpeedValue.text = "%.1f m/s".format(currentSpeed)
-
-        binding.routeSpeedSlider.addOnChangeListener { _, value, fromUser ->
+        refreshPaceControls()
+        binding.routePaceSlider.setLabelFormatter { RoutePace.format(it.toInt()) }
+        var draggingPace = false
+        binding.routePaceSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
-                val newSpeed = value.toDouble()
-                requireContext().speed = newSpeed
-                FakeLoc.speed = newSpeed
-                binding.routeSpeedValue.text = "%.1f m/s".format(newSpeed)
-                if (mockServiceViewModel.locationManager != null && MockServiceHelper.isServiceInit()) {
-                    MockServiceHelper.setSpeed(mockServiceViewModel.locationManager!!, value)
-                }
+                binding.routePaceValue.text = getString(R.string.route_pace_value, RoutePace.format(value.toInt()))
+                // Keyboard and accessibility actions do not have a touch-release callback.
+                if (!draggingPace) savePace(value.toInt())
             }
         }
-
+        binding.routePaceSlider.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: Slider) { draggingPace = true }
+            override fun onStopTrackingTouch(slider: Slider) {
+                draggingPace = false
+                savePace(slider.value.toInt())
+            }
+        })
+        binding.routePaceValue.setOnClickListener { showPaceDialog() }
 
         binding.fab.setOnClickListener { view ->
             val subFabList = arrayOf(
@@ -258,22 +265,21 @@ class RouteMockFragment : Fragment() {
             if (isLongClick) {
                 Toast.makeText(requireContext(), "长按", Toast.LENGTH_SHORT).show()
             } else {
+                if (!RouteStepper.isValid(route.route)) {
+                    showToast("路线为空或坐标不合法，请重新选择")
+                    return@HistoricalRouteAdapter
+                }
+                mockServiceViewModel.stopMovement()
                 binding.mockRouteName.text = route.name
                 mockServiceViewModel.selectedRoute = route
                 requireContext().selectRoute = route
 
-                if (MockServiceHelper.isMockStart(mockServiceViewModel.locationManager!!)) {
-                    // 获取第一个点
-                    val first = route.route[0]
-                    if (MockServiceHelper.setLocation(
-                            mockServiceViewModel.locationManager!!,
-                            first.first,
-                            first.second
-                        )
-                    ) {
-                        Toast.makeText(requireContext(), "位置更新成功", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(requireContext(), "更新位置失败", Toast.LENGTH_SHORT).show()
+                val lm = mockServiceViewModel.locationManager
+                if (lm != null && MockServiceHelper.isMockStart(lm)) {
+                    val first = route.route.first()
+                    lifecycleScope.launch {
+                        val success = mockServiceViewModel.placeLocation(first.first, first.second)
+                        showToast(if (success) "位置更新成功" else "更新位置失败")
                     }
                 }
             }
@@ -333,6 +339,11 @@ class RouteMockFragment : Fragment() {
             showToast("请选择一个路线")
             return
         }
+        if (!RouteStepper.isValid(selectedRoute.route)) {
+            showToast("路线为空或坐标不合法，请重新选择")
+            return
+        }
+        mockServiceViewModel.stopMovement()
 
         if (mockServiceViewModel.locationManager == null) {
             showToast("定位服务加载异常")
@@ -418,6 +429,7 @@ class RouteMockFragment : Fragment() {
                         return@withContext false
                     }
                 }
+                if (isClosed) mockServiceViewModel.stopMovement()
                 if (isClosed && mockServiceViewModel.rocker.isStart) {
                     binding.rocker.isClickable = false
                     binding.rocker.toggle()
@@ -431,6 +443,84 @@ class RouteMockFragment : Fragment() {
         }
     }
 
+
+    private fun refreshPaceControls() {
+        val pace = RoutePace.fromSpeed(requireContext().speed)
+        binding.routePaceSlider.value = (pace ?: RoutePace.DEFAULT_SECONDS)
+            .coerceIn(RoutePace.MIN_SECONDS, RoutePace.MAX_SECONDS).toFloat()
+        binding.routePaceValue.text = pace?.let {
+            getString(R.string.route_pace_value, RoutePace.format(it))
+        } ?: getString(R.string.route_pace_unset)
+        binding.routePaceHint.setText(if (pace != null && pace in RoutePace.MIN_SECONDS..RoutePace.MAX_SECONDS)
+            R.string.route_pace_hint else R.string.route_pace_unsupported)
+    }
+
+    private fun savePace(seconds: Int) {
+        val speed = RoutePace.toSpeed(seconds)
+        requireContext().speed = speed
+        refreshPaceControls()
+        val lm = mockServiceViewModel.locationManager
+        if (lm != null && MockServiceHelper.isServiceInit() &&
+            !MockServiceHelper.setSpeed(lm, speed.toFloat())) {
+            showToast(getString(R.string.route_pace_sync_failed))
+        }
+    }
+
+    private fun showPaceDialog() {
+        if (paceDialog?.isShowing == true) return
+        val input = DialogRoutePaceBinding.inflate(layoutInflater)
+        val pace = (RoutePace.fromSpeed(requireContext().speed) ?: RoutePace.DEFAULT_SECONDS)
+            .coerceIn(RoutePace.MIN_SECONDS, RoutePace.MAX_SECONDS)
+        input.minutes.setText((pace / 60).toString())
+        input.seconds.setText(String.format(Locale.ROOT, "%02d", pace % 60))
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.route_pace_edit)
+            .setView(input.root)
+            .setPositiveButton(R.string.route_pace_save, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        paceDialog = dialog
+        dialog.setOnDismissListener { paceDialog = null }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                input.minutesLayout.error = null
+                input.secondsLayout.error = null
+                val minutes = input.minutes.text?.toString()?.toIntOrNull()
+                val seconds = input.seconds.text?.toString()?.toIntOrNull()
+                when {
+                    minutes == null || minutes < 0 -> {
+                        input.minutesLayout.error = getString(R.string.route_pace_minutes_invalid)
+                        input.minutes.requestFocus()
+                    }
+                    seconds == null || seconds !in 0..59 -> {
+                        input.secondsLayout.error = getString(R.string.route_pace_seconds_invalid)
+                        input.seconds.requestFocus()
+                    }
+                    minutes * 60 + seconds !in RoutePace.MIN_SECONDS..RoutePace.MAX_SECONDS -> {
+                        input.minutesLayout.error = getString(R.string.route_pace_range_invalid)
+                    }
+                    else -> {
+                        savePace(minutes * 60 + seconds)
+                        dialog.dismiss()
+                    }
+                }
+            }
+            input.seconds.setOnEditorActionListener { _, action, _ ->
+                if (action == EditorInfo.IME_ACTION_DONE) {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                    true
+                } else false
+            }
+        }
+        dialog.show()
+    }
+
+    override fun onDestroyView() {
+        paceDialog?.dismiss()
+        paceDialog = null
+        _binding = null
+        super.onDestroyView()
+    }
 
     private fun showToast(message: String) = lifecycleScope.launch(Dispatchers.Main) {
         Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()

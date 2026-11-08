@@ -99,4 +99,18 @@
     <string name="appearance_light">浅色</string>
     <string name="appearance_dark">深色</string>
     <string name="appearance_save_failed">外观设置保存失败</string>
+    <string name="route_pace_title">目标配速</string>
+    <string name="route_pace_value">%1$s /公里</string>
+    <string name="route_pace_edit">设置目标配速</string>
+    <string name="route_pace_hint">配速越小越快；松手生效，点击配速可精确设置。速度在目标附近 ±3% 缓慢波动。</string>
+    <string name="route_pace_dialog_hint">每公里用时，支持 0:20～33:20。配速越小，速度越快。</string>
+    <string name="route_pace_minutes">分钟</string>
+    <string name="route_pace_seconds">秒</string>
+    <string name="route_pace_minutes_invalid">请输入分钟数</string>
+    <string name="route_pace_seconds_invalid">请输入 0～59 秒</string>
+    <string name="route_pace_range_invalid">请输入 0:20～33:20 /公里</string>
+    <string name="route_pace_unset">点击设置配速</string>
+    <string name="route_pace_unsupported">当前速度为 0 或超出配速范围，请点击设置。</string>
+    <string name="route_pace_save">保存</string>
+    <string name="route_pace_sync_failed">配速已保存，未能同步到系统服务</string>
 </resources>
