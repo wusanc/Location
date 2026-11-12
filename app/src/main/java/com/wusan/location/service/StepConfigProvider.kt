@@ -7,8 +7,24 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import moe.wusan.xposed.hooks.sensor.StepSimulationContract as Contract
+import kotlin.math.roundToInt
 
-data class StepSimulationSettings(val enabled: Boolean = false, val cadence: Int = Contract.DEFAULT_CADENCE) {
+data class StepSimulationSettings(
+    val enabled: Boolean = false,
+    val cadence: Int = Contract.DEFAULT_CADENCE,
+    val routeEnabled: Boolean = true,
+    val routeStepLengthMeters: Double = RouteCadence.DEFAULT_STEP_LENGTH,
+) {
+    data class Delivery(val enabled: Boolean, val cadence: Int)
+
+    fun delivery(route: RouteStepHeartbeat.Snapshot): Delivery {
+        if (routeEnabled && route.active) {
+            val rate = route.cadence.roundToInt().coerceIn(0, Contract.MAX_CADENCE)
+            return Delivery(rate >= Contract.MIN_CADENCE, rate)
+        }
+        return Delivery(enabled, cadence)
+    }
+
     companion object {
         private const val PREFS = "step_simulation"
 
@@ -17,15 +33,21 @@ data class StepSimulationSettings(val enabled: Boolean = false, val cadence: Int
             return StepSimulationSettings(
                 prefs.getBoolean(Contract.ENABLED, false),
                 prefs.getInt(Contract.CADENCE, Contract.DEFAULT_CADENCE)
-                    .coerceIn(Contract.MIN_CADENCE, Contract.MAX_CADENCE)
+                    .coerceIn(Contract.MIN_CADENCE, Contract.MAX_CADENCE),
+                prefs.getBoolean("route_enabled", true),
+                prefs.getFloat("route_step_length_meters", RouteCadence.DEFAULT_STEP_LENGTH.toFloat())
+                    .toDouble().takeIf { RouteCadence.validStepLength(it) } ?: RouteCadence.DEFAULT_STEP_LENGTH,
             )
         }
 
         fun save(context: Context, settings: StepSimulationSettings): Boolean {
             require(settings.cadence in Contract.MIN_CADENCE..Contract.MAX_CADENCE)
+            require(RouteCadence.validStepLength(settings.routeStepLengthMeters))
             val saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putBoolean(Contract.ENABLED, settings.enabled)
                 .putInt(Contract.CADENCE, settings.cadence)
+                .putBoolean("route_enabled", settings.routeEnabled)
+                .putFloat("route_step_length_meters", settings.routeStepLengthMeters.toFloat())
                 .commit()
             if (saved) context.contentResolver.notifyChange(Uri.parse(Contract.URI), null)
             return saved
@@ -41,10 +63,11 @@ class StepConfigProvider : ContentProvider() {
                        selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
         require(uri.authority == Contract.AUTHORITY && uri.path == "/config")
         val config = StepSimulationSettings.read(requireNotNull(context))
+        val delivery = config.delivery(RouteStepState.snapshot())
         val columns = projection ?: arrayOf(Contract.ENABLED, Contract.CADENCE)
         require(columns.all { it == Contract.ENABLED || it == Contract.CADENCE })
         return MatrixCursor(columns).apply {
-            addRow(columns.map { if (it == Contract.ENABLED) if (config.enabled) 1 else 0 else config.cadence })
+            addRow(columns.map { if (it == Contract.ENABLED) if (delivery.enabled) 1 else 0 else delivery.cadence })
         }
     }
 

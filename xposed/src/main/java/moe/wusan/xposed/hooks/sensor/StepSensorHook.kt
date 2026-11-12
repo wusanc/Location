@@ -18,7 +18,6 @@ import java.lang.reflect.Method
 import java.util.IdentityHashMap
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.max
 
 /** Client-side only. LSPosed controls which app processes load this hook. */
 object StepSensorHook {
@@ -33,7 +32,7 @@ object StepSensorHook {
     @Volatile private var enabled = false
     private var cadence = StepSimulationContract.DEFAULT_CADENCE
     private var generation = 0L
-    private var cumulativeSteps = 0L
+    private val counterState = StepCounterState()
     private var lastReadAt = 0L
     private var lastErrorAt = 0L
     private var lastAccessRequestAt = 0L
@@ -41,7 +40,7 @@ object StepSensorHook {
     private class Registration(val queue: Any, val handle: Int, val sensor: Sensor,
                                val handler: Handler) {
         val deliveryPending = AtomicBoolean(false)
-        var counterBaselineSeen = false
+        var counterBaselineDelivered = false
     }
 
     @Synchronized
@@ -58,29 +57,42 @@ object StepSensorHook {
                 synchronized(lock) {
                     val registration = registrations[param.thisObject]?.get(param.args[0] as Int) ?: return
                     val values = param.args[1] as FloatArray
-                    // Establish a physical baseline before replacing cumulative counter events.
-                    val needsBaseline = registration.sensor.type == Sensor.TYPE_STEP_COUNTER &&
-                        !registration.counterBaselineSeen
-                    if ((!enabled || needsBaseline) && registration.sensor.type == Sensor.TYPE_STEP_COUNTER) {
-                        val count = values.firstOrNull()?.toDouble() ?: 0.0
-                        if (count.isFinite() && count >= 0.0) {
-                            cumulativeSteps = max(cumulativeSteps, count.toLong())
-                            registration.counterBaselineSeen = true
-                            if (enabled && needsBaseline) values[0] = cumulativeSteps.toFloat()
+                    if (registration.sensor.type == Sensor.TYPE_STEP_COUNTER) {
+                        val count = values.firstOrNull()
+                        if (count != null && count.isFinite() && count >= 0f) {
+                            val mapped = counterState.observePhysical(count, param.args[3] as Long, enabled)
+                            if (!enabled) {
+                                // Before the first simulation this is the untouched physical value.
+                                // Afterwards retain the simulated offset so toggling cannot roll back.
+                                values[0] = mapped
+                                registration.counterBaselineDelivered = true
+                            }
                         }
                     }
-                    // Synthetic delivery invokes the original method directly and bypasses this hook.
-                    if (enabled && !needsBaseline) param.result = null
+                    // No physical event is needed to start simulation. A late hardware baseline
+                    // must not replace the baseline already delivered by the synthetic stream.
+                    if (enabled) param.result = null
                 }
             }
         })
 
         XposedBridge.hookAllMethods(manager, "registerListenerImpl", object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
-                if (param.hasThrowable() || param.result != true) return
+                val sensor = param.args.getOrNull(1) as? Sensor ?: return
+                if (param.hasThrowable() || param.result != true) {
+                    if (sensor.type != Sensor.TYPE_STEP_COUNTER && sensor.type != Sensor.TYPE_STEP_DETECTOR) return
+                    val granted = runCatching {
+                        val appContext = XposedHelpers.getObjectField(param.thisObject, "mContext") as Context
+                        android.os.Build.VERSION.SDK_INT < 29 || appContext.checkSelfPermission(
+                            "android.permission.ACTIVITY_RECOGNITION") == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    }.getOrNull()
+                    val message = "Step sensor registration rejected: type=${sensor.type}, " +
+                        "activityRecognitionGranted=$granted, result=${param.result}; no synthetic events registered"
+                    if (param.hasThrowable()) Logger.warn(message, param.throwable) else Logger.warn(message)
+                    return
+                }
                 runCatching {
                     val listener = param.args[0] as? SensorEventListener ?: return
-                    val sensor = param.args[1] as? Sensor ?: return
                     @Suppress("UNCHECKED_CAST")
                     val queues = XposedHelpers.getObjectField(param.thisObject, "mSensorListeners") as Map<Any, Any>
                     val eventQueue = synchronized(queues) { queues[listener] } ?: return
@@ -151,7 +163,7 @@ object StepSensorHook {
             } ?: return
 
             // Query outside the lock: provider startup / IPC must never block sensor callbacks.
-            if (lastReadAt == 0L || now - lastReadAt >= 1_000_000_000L) {
+            if (lastReadAt == 0L || now - lastReadAt >= 250_000_000L) {
                 val config = runCatching {
                     appContext.contentResolver.query(Uri.parse(StepSimulationContract.URI),
                         arrayOf(StepSimulationContract.ENABLED, StepSimulationContract.CADENCE), null, null, null)?.use {
@@ -162,8 +174,10 @@ object StepSensorHook {
                 synchronized(lock) {
                     if (registrations.isEmpty()) return
                     val (newEnabled, newCadence) = config.getOrDefault(false to cadence)
-                    if (enabled != newEnabled || cadence != newCadence) generation++
-                    enabled = newEnabled && newCadence in StepSimulationContract.MIN_CADENCE..StepSimulationContract.MAX_CADENCE
+                    val validEnabled = newEnabled && newCadence in
+                        StepSimulationContract.MIN_CADENCE..StepSimulationContract.MAX_CADENCE
+                    if (enabled != validEnabled) generation++
+                    enabled = validEnabled
                     cadence = newCadence
                     clock.configure(SystemClock.elapsedRealtimeNanos(), enabled, cadence)
                     lastReadAt = now
@@ -190,33 +204,21 @@ object StepSensorHook {
 
             val timestamp = SystemClock.elapsedRealtimeNanos()
             synchronized(lock) {
-                if (clock.poll(timestamp)) {
-                    cumulativeSteps++
-                    val count = cumulativeSteps.toFloat()
-                    val version = generation
-                    registrations.values.flatMap { it.values }.forEach { registration ->
-                        // A cumulative counter must first deliver its real baseline so consumers
-                        // don't interpret a synthetic session count as a negative step delta.
-                        if (registration.sensor.type == Sensor.TYPE_STEP_COUNTER &&
-                            !registration.counterBaselineSeen) return@forEach
-                        if (registration.deliveryPending.compareAndSet(false, true)) {
-                            val posted = registration.handler.post {
-                                registration.deliveryPending.set(false)
-                                val valid = synchronized(lock) {
-                                    enabled && version == generation &&
-                                        registrations[registration.queue]?.get(registration.handle) === registration
-                                }
-                                // Do not deliver a burst of stale events to a stalled app Looper.
-                                if (valid && SystemClock.elapsedRealtimeNanos() - timestamp < 1_000_000_000L) {
-                                    val values = FloatArray(16)
-                                    values[0] = if (registration.sensor.type == Sensor.TYPE_STEP_COUNTER) count else 1f
-                                    runCatching {
-                                        XposedBridge.invokeOriginalMethod(dispatchMethod, registration.queue,
-                                            arrayOf(registration.handle, values, 3, timestamp))
-                                    }.onFailure { Logger.warn("Step event callback failed", it) }
-                                }
-                            }
-                            if (!posted) registration.deliveryPending.set(false)
+                if (enabled) {
+                    val currentRegistrations = registrations.values.flatMap { it.values }
+                    // Establish a session baseline even when the handset is motionless and the
+                    // hardware counter never sends its first on-change event.
+                    val baseline = counterState.baseline()
+                    currentRegistrations.filter {
+                        it.sensor.type == Sensor.TYPE_STEP_COUNTER && !it.counterBaselineDelivered
+                    }.forEach { postEvent(it, baseline, timestamp, generation) }
+                    if (clock.poll(timestamp)) {
+                        val count = counterState.step()
+                        currentRegistrations.forEach { registration ->
+                            if (registration.sensor.type == Sensor.TYPE_STEP_COUNTER &&
+                                !registration.counterBaselineDelivered) return@forEach
+                            val value = if (registration.sensor.type == Sensor.TYPE_STEP_COUNTER) count else 1f
+                            postEvent(registration, value, timestamp, generation)
                         }
                     }
                 }
@@ -224,9 +226,37 @@ object StepSensorHook {
                 // Keep exactly one future tick rather than creating multiple timer loops.
                 worker?.removeCallbacks(this)
                 if (registrations.isNotEmpty()) {
-                    worker?.postDelayed(this, clock.delayMillis(SystemClock.elapsedRealtimeNanos()))
+                    worker?.postDelayed(this, clock.delayMillis(SystemClock.elapsedRealtimeNanos()).coerceAtMost(250L))
                 }
             }
         }
+    }
+
+    private fun postEvent(registration: Registration, value: Float, timestamp: Long, version: Long) {
+        if (!registration.deliveryPending.compareAndSet(false, true)) return
+        val posted = registration.handler.post {
+            try {
+                val valid = synchronized(lock) {
+                    enabled && version == generation &&
+                        registrations[registration.queue]?.get(registration.handle) === registration
+                }
+                // Keep the original listener Looper and discard stale work after a long stall.
+                if (!valid || SystemClock.elapsedRealtimeNanos() - timestamp >= 1_000_000_000L) return@post
+                val values = FloatArray(16).apply { this[0] = value }
+                val delivered = runCatching {
+                    XposedBridge.invokeOriginalMethod(dispatchMethod, registration.queue,
+                        arrayOf(registration.handle, values, 3, timestamp))
+                }.onFailure { Logger.warn("Step event callback failed", it) }.isSuccess
+                if (delivered && registration.sensor.type == Sensor.TYPE_STEP_COUNTER) synchronized(lock) {
+                    if (registrations[registration.queue]?.get(registration.handle) === registration) {
+                        registration.counterBaselineDelivered = true
+                    }
+                }
+            } finally {
+                // Do not queue a second baseline while the first callback is still executing.
+                registration.deliveryPending.set(false)
+            }
+        }
+        if (!posted) registration.deliveryPending.set(false)
     }
 }

@@ -5,17 +5,30 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.os.Bundle
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import androidx.appcompat.app.AlertDialog
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.slider.Slider
 import com.wusan.location.databinding.DialogRoutePaceBinding
+import com.wusan.location.databinding.DialogInputBinding
+import com.wusan.location.service.StepSimulationSettings
+import com.wusan.location.service.RouteCadence
+import kotlin.math.roundToInt
 import java.util.Locale
 import android.view.animation.DecelerateInterpolator
 import android.widget.CheckedTextView
 import android.widget.Toast
+import android.widget.ScrollView
+import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
@@ -25,25 +38,27 @@ import androidx.navigation.Navigation
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.alibaba.fastjson2.JSON
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.wusan.location.R
 import com.wusan.location.android.root.ShellUtils
-import com.wusan.location.android.widget.RockerView
 import com.wusan.location.android.window.OverlayUtils
 import com.wusan.location.databinding.FragmentRouteMockBinding
 import com.wusan.location.ext.altitude
 import com.wusan.location.ext.drawOverOtherAppsEnabled
 import com.wusan.location.ext.hookSensor
-import com.wusan.location.ext.jsonHistoricalRoutes
 import com.wusan.location.ext.needOpenSELinux
 import com.wusan.location.ext.selectRoute
 import com.wusan.location.ext.speed
 import com.wusan.location.service.MockServiceHelper
+import com.wusan.location.service.MockRuntime
+import com.wusan.location.service.RuntimeDiagnostics
 import com.wusan.location.ui.viewmodel.HomeViewModel
 import com.wusan.location.ui.viewmodel.MockServiceViewModel
 import moe.wusan.xposed.utils.FakeLoc
@@ -53,6 +68,23 @@ class RouteMockFragment : Fragment() {
     private var _binding: FragmentRouteMockBinding? = null
     private val binding get() = _binding!!
     private var paceDialog: AlertDialog? = null
+    private var cadenceDialog: AlertDialog? = null
+    private var routeActionsDialog: AlertDialog? = null
+    private var diagnosticsDialog: AlertDialog? = null
+    private var diagnosticsJob: Job? = null
+    private var diagnosticsText: String? = null
+    private var routeAdapter: HistoricalRouteAdapter? = null
+    private var displayedRoutes: List<HistoricalRoute> = emptyList()
+    private val transferViewModel by viewModels<RouteTransferViewModel>()
+    private val importDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) {
+        transferViewModel.importDocument(it)
+    }
+    private val exportJsonDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) {
+        transferViewModel.exportDocument(it)
+    }
+    private val exportGpxDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/gpx+xml")) {
+        transferViewModel.exportDocument(it)
+    }
 
     private val routeMockViewModel by viewModels<HomeViewModel>()
     private val mockServiceViewModel by activityViewModels<MockServiceViewModel>()
@@ -109,42 +141,7 @@ class RouteMockFragment : Fragment() {
                     }
                 }
             }
-            rocker.setRockerListener(object : RockerView.Companion.OnMoveListener {
-                override fun onAngle(angle: Double) {
-                    MockServiceHelper.setBearing(locationManager!!, angle)
-                    FakeLoc.bearing = angle
-                    FakeLoc.hasBearings = true
-                }
 
-                override fun onLockChanged(isLocked: Boolean) {
-                    isRockerLocked = isLocked
-                }
-
-                override fun onFinished() {
-                    if (!isRockerLocked) {
-                        rockerCoroutineController.pause()
-                    }
-                }
-
-                override fun onStarted() {
-                    rockerCoroutineController.resume()
-                }
-            })
-            rocker.setRockerAutoListener(object : Rocker.Companion.OnAutoListener {
-                override fun onAutoPlay(isPlay: Boolean) {
-                    if (isPlay) {
-                        // 路线巡航时把摇杆循环停掉，否则两条循环同时 move()，位移翻倍
-                        rockerCoroutineController.pause()
-                        routeMockCoroutine.resume()
-                    } else {
-                        routeMockCoroutine.pause()
-                    }
-                }
-
-                override fun onAutoLock(isLock: Boolean) {
-
-                }
-            })
         }
 
         requireContext().selectRoute?.let {
@@ -152,6 +149,7 @@ class RouteMockFragment : Fragment() {
             mockServiceViewModel.selectedRoute = it
         }
 
+        setupRouteSteps()
         refreshPaceControls()
         binding.routePaceSlider.setLabelFormatter { RoutePace.format(it.toInt()) }
         var draggingPace = false
@@ -246,88 +244,214 @@ class RouteMockFragment : Fragment() {
             activity?.findNavController(R.id.nav_host_fragment_content_main)?.navigate(R.id.nav_route_edit)
         }
 
-        var locations = requireContext().jsonHistoricalRoutes
-//        val routes = Json.decodeFromString<List<HistoricalRoute>>(locations)
-        // 如果locations是空字符串，则创建默认
-        if (locations.isEmpty()) {
-            val defaultRoute = HistoricalRoute(
-                "默认路线",
-                mutableListOf(Pair(39.908822, 116.397465), Pair(39.907951, 116.397500))
-            )
-            val defaultRoutes = mutableListOf(defaultRoute)
-            requireContext().jsonHistoricalRoutes = JSON.toJSONString(defaultRoutes)
-            locations = requireContext().jsonHistoricalRoutes
-        }
-        val routes = JSON.parseArray(locations, HistoricalRoute::class.java)
-
-        val historicalRouteAdapter = HistoricalRouteAdapter(routes.sortedBy { it.name }
-            .toMutableList()) { route, isLongClick ->
-            if (isLongClick) {
-                Toast.makeText(requireContext(), "长按", Toast.LENGTH_SHORT).show()
-            } else {
-                if (!RouteStepper.isValid(route.route)) {
-                    showToast("路线为空或坐标不合法，请重新选择")
-                    return@HistoricalRouteAdapter
-                }
-                mockServiceViewModel.stopMovement()
-                binding.mockRouteName.text = route.name
-                mockServiceViewModel.selectedRoute = route
-                requireContext().selectRoute = route
-
-                val lm = mockServiceViewModel.locationManager
-                if (lm != null && MockServiceHelper.isMockStart(lm)) {
-                    val first = route.route.first()
-                    lifecycleScope.launch {
-                        val success = mockServiceViewModel.placeLocation(first.first, first.second)
-                        showToast(if (success) "位置更新成功" else "更新位置失败")
-                    }
+        setupRouteList()
+        binding.routeImport.setOnClickListener {
+            if (transferViewModel.beginImport()) {
+                try {
+                    importDocument.launch(arrayOf("*/*"))
+                } catch (_: Exception) {
+                    transferViewModel.fail("无法打开文件选择器，请检查系统文件应用")
                 }
             }
         }
-
-
-        val recyclerView = binding.historicalRouteList
-        recyclerView.layoutManager = LinearLayoutManager(requireContext())
-        recyclerView.adapter = historicalRouteAdapter
-
-        ItemTouchHelper(object :
-            ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
-            override fun onMove(
-                recyclerView: RecyclerView,
-                viewHolder: RecyclerView.ViewHolder,
-                target: RecyclerView.ViewHolder
-            ): Boolean {
-                return false
-            }
-
-            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                val position = viewHolder.adapterPosition
-                val location = historicalRouteAdapter[position]
-                with(requireContext()) {
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle("删除路线")
-                        .setMessage("确定要删除路线(${location.name})吗？")
-                        .setPositiveButton("删除") { _, _ ->
-                            historicalRouteAdapter.removeItem(position)
-                            JSON.parseArray(jsonHistoricalRoutes, HistoricalRoute::class.java)
-                                .toMutableList().apply {
-                                    removeIf { it.name == location.name }
-                                }.let {
-                                    jsonHistoricalRoutes = JSON.toJSONString(it)
-                                }
-                            showToast("已删除路线")
-                        }
-                        .setNegativeButton("取消", { _, _ ->
-                            historicalRouteAdapter.notifyItemChanged(position)
-                        })
-                        .show()
-                }
-            }
-        }).attachToRecyclerView(recyclerView)
+        binding.routeExport.setOnClickListener { showExportOptions() }
+        binding.runtimeDiagnostics.setOnClickListener { showRuntimeDiagnostics() }
 
         return binding.root
     }
 
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                transferViewModel.state.collect { state ->
+                    val currentBinding = _binding ?: return@collect
+                    currentBinding.routeImport.isEnabled = !state.busy
+                    currentBinding.routeExport.isEnabled = !state.busy
+                    currentBinding.fabAddRoute.isEnabled = !state.busy
+                    currentBinding.routeTransferProgress.visibility = if (state.busy) View.VISIBLE else View.GONE
+                    if (displayedRoutes != state.routes) {
+                        displayedRoutes = state.routes
+                        routeAdapter?.replaceItems(state.routes)
+                    }
+                    state.message?.let {
+                        Toast.makeText(requireContext(), it, Toast.LENGTH_LONG).show()
+                        transferViewModel.acknowledgeMessage()
+                    }
+                    state.saveRequest?.let { request ->
+                        transferViewModel.consumeSaveRequest()
+                        try {
+                            when (request.format) {
+                                RouteFileCodec.Format.JSON -> exportJsonDocument.launch(request.fileName)
+                                RouteFileCodec.Format.GPX -> exportGpxDocument.launch(request.fileName)
+                            }
+                        } catch (_: Exception) {
+                            transferViewModel.fail("无法打开文件保存界面，请检查系统文件应用")
+                        }
+                    }
+                }
+            }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                var lastMockEnabled: Boolean? = null
+                MockRuntime.state.collect { state ->
+                    val currentBinding = _binding ?: return@collect
+                    currentBinding.runtimeStatus.text = getString(R.string.runtime_status_inline,
+                        RuntimeDiagnostics.phaseLabel(requireContext(), state.phase))
+                    if (lastMockEnabled != state.mockEnabled) {
+                        lastMockEnabled = state.mockEnabled
+                        currentBinding.switchMock.setText(if (state.mockEnabled)
+                            R.string.runtime_stop_mock else R.string.runtime_start_mock)
+                        currentBinding.switchMock.icon = ContextCompat.getDrawable(requireContext(),
+                            if (state.mockEnabled) R.drawable.rounded_play_disabled_24
+                            else R.drawable.rounded_play_arrow_24)
+                    }
+                    currentBinding.rocker.isChecked = MockRuntime.rockerOrNull?.isStart == true
+                }
+            }
+        }
+    }
+
+    private fun showRuntimeDiagnostics() {
+        if (diagnosticsDialog?.isShowing == true) return
+        val panelContext = requireContext()
+        val inset = (20 * resources.displayMetrics.density).roundToInt()
+        val text = TextView(panelContext).apply {
+            setTextIsSelectable(true)
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_MaterialComponents_Body2)
+            setTextColor(ContextCompat.getColor(panelContext, R.color.wechat_text_primary))
+            setPadding(inset, inset / 2, inset, inset / 2)
+            setText(R.string.runtime_diagnostic_loading)
+        }
+        val scroll = ScrollView(panelContext).apply { addView(text) }
+        val dialog = MaterialAlertDialogBuilder(panelContext)
+            .setTitle(R.string.runtime_diagnostic_title)
+            .setView(scroll)
+            .setNeutralButton(R.string.runtime_diagnostic_copy, null)
+            .setNegativeButton(R.string.runtime_diagnostic_close, null)
+            .create()
+        diagnosticsDialog = dialog
+        diagnosticsText = null
+        dialog.setOnDismissListener {
+            diagnosticsJob?.cancel()
+            diagnosticsJob = null
+            diagnosticsText = null
+            if (diagnosticsDialog === dialog) diagnosticsDialog = null
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val report = diagnosticsText ?: return@setOnClickListener
+                val clipboard = panelContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.runtime_diagnostic_title), report))
+                    Toast.makeText(panelContext, R.string.runtime_diagnostic_copied, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        dialog.show()
+        val owner = viewLifecycleOwner
+        diagnosticsJob = owner.lifecycleScope.launch {
+            owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive && dialog.isShowing) {
+                    val snapshot = RuntimeDiagnostics.read(mockServiceViewModel.locationManager)
+                    val report = RuntimeDiagnostics.format(panelContext, snapshot)
+                    diagnosticsText = report
+                    text.text = report
+                    delay(1_000)
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        transferViewModel.refresh()
+    }
+
+    private fun setupRouteList() {
+        val adapter = HistoricalRouteAdapter(mutableListOf()) { route, longClick ->
+            if (!transferViewModel.state.value.busy) {
+                if (longClick) showExportOptions(route) else selectRoute(route)
+            }
+        }
+        routeAdapter = adapter
+        displayedRoutes = emptyList()
+        binding.historicalRouteList.layoutManager = LinearLayoutManager(requireContext())
+        binding.historicalRouteList.adapter = adapter
+        ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
+            override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder) = false
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                val position = viewHolder.adapterPosition
+                if (position == RecyclerView.NO_POSITION) return
+                val route = adapter[position]
+                // Reset the swiped row even if the dialog is dismissed by Back or rotation.
+                adapter.notifyItemChanged(position)
+                if (transferViewModel.state.value.busy) return
+                routeActionsDialog?.dismiss()
+                val appContext = requireContext().applicationContext
+                routeActionsDialog = MaterialAlertDialogBuilder(requireContext())
+                    .setTitle("删除路线")
+                    .setMessage("确定要删除路线（${route.name}）吗？")
+                    .setPositiveButton("删除") { _, _ ->
+                        transferViewModel.delete(route) { remaining ->
+                            if (mockServiceViewModel.selectedRoute == route && route !in remaining) {
+                                mockServiceViewModel.stopMovement()
+                                mockServiceViewModel.selectedRoute = null
+                                appContext.selectRoute = null
+                                _binding?.mockRouteName?.setText(R.string.none_route)
+                            }
+                        }
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+        }).attachToRecyclerView(binding.historicalRouteList)
+    }
+
+    private fun selectRoute(route: HistoricalRoute) {
+        if (!RouteStepper.isValid(route.route)) {
+            showToast("路线为空或坐标不合法，请重新选择")
+            return
+        }
+        mockServiceViewModel.stopMovement()
+        binding.mockRouteName.text = route.name
+        mockServiceViewModel.selectedRoute = route
+        requireContext().selectRoute = route
+        val lm = mockServiceViewModel.locationManager
+        if (lm != null && MockServiceHelper.isMockStart(lm)) {
+            val first = route.route.first()
+            lifecycleScope.launch {
+                val success = mockServiceViewModel.placeLocation(first.first, first.second)
+                showToast(if (success) "位置更新成功" else "更新位置失败")
+            }
+        }
+    }
+
+    private fun showExportOptions(route: HistoricalRoute? = null) {
+        if (transferViewModel.state.value.busy) return
+        val choices = if (route == null) arrayOf("导出全部路线（JSON）", "导出当前路线（JSON）",
+            "导出全部路线（GPX）", "导出当前路线（GPX）")
+            else arrayOf("导出此路线（JSON）", "导出此路线（GPX）")
+        routeActionsDialog?.dismiss()
+        routeActionsDialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.route_export)
+            .setItems(choices) { _, index ->
+                val selected = route ?: if (index % 2 == 1) mockServiceViewModel.selectedRoute else null
+                if (route == null && index % 2 == 1 && selected == null) {
+                    showToast("请先选择一条路线")
+                } else {
+                    val gpx = if (route == null) index >= 2 else index == 1
+                    transferViewModel.prepareExport(selected,
+                        if (gpx) RouteFileCodec.Format.GPX else RouteFileCodec.Format.JSON)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
 
     private fun tryOpenService(button: MaterialButton) {
         if (!OverlayUtils.hasOverlayPermissions(requireContext())) {
@@ -444,6 +568,66 @@ class RouteMockFragment : Fragment() {
     }
 
 
+    private fun setupRouteSteps() {
+        val config = StepSimulationSettings.read(requireContext())
+        binding.routeStepsSwitch.isChecked = config.routeEnabled
+        refreshRouteStride()
+        var reverting = false
+        binding.routeStepsSwitch.setOnCheckedChangeListener { button, enabled ->
+            if (reverting) return@setOnCheckedChangeListener
+            val current = StepSimulationSettings.read(requireContext())
+            if (!StepSimulationSettings.save(requireContext(), current.copy(routeEnabled = enabled))) {
+                reverting = true
+                button.isChecked = current.routeEnabled
+                reverting = false
+                showToast(getString(R.string.step_settings_failed))
+            }
+        }
+        binding.routeStrideValue.setOnClickListener {
+            if (cadenceDialog?.isShowing == true) return@setOnClickListener
+            val input = DialogInputBinding.inflate(layoutInflater)
+            input.title.setText(R.string.route_stride_input)
+            input.value.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            input.value.setText(String.format(Locale.ROOT, "%.2f",
+                StepSimulationSettings.read(requireContext()).routeStepLengthMeters))
+            val dialog = MaterialAlertDialogBuilder(requireContext())
+                .setView(input.root)
+                .setPositiveButton(R.string.route_pace_save, null)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create()
+            cadenceDialog = dialog
+            dialog.setOnDismissListener { cadenceDialog = null }
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    val stride = input.value.text?.toString()?.replace(',', '.')?.toDoubleOrNull()
+                    if (stride == null || !RouteCadence.validStepLength(stride)) {
+                        input.value.error = getString(R.string.route_stride_invalid)
+                    } else {
+                        val current = StepSimulationSettings.read(requireContext())
+                        if (StepSimulationSettings.save(requireContext(), current.copy(routeStepLengthMeters = stride))) {
+                            refreshRouteStride()
+                            dialog.dismiss()
+                        } else {
+                            showToast(getString(R.string.step_settings_failed))
+                        }
+                    }
+                }
+            }
+            dialog.show()
+        }
+    }
+
+    private fun refreshRouteStride() {
+        val stride = StepSimulationSettings.read(requireContext()).routeStepLengthMeters
+        binding.routeStrideValue.text = getString(R.string.route_stride_value,
+            String.format(Locale.ROOT, "%.2f", stride))
+        val speed = requireContext().speed
+        val estimate = RouteCadence.target(speed, stride).roundToInt()
+        val limited = speed.isFinite() && speed > 0.0 && speed * 60.0 / stride > RouteCadence.MAX_CADENCE
+        binding.routeCadencePreview.text = getString(if (limited) R.string.route_cadence_limited
+            else R.string.route_cadence_estimate, estimate)
+    }
+
     private fun refreshPaceControls() {
         val pace = RoutePace.fromSpeed(requireContext().speed)
         binding.routePaceSlider.value = (pace ?: RoutePace.DEFAULT_SECONDS)
@@ -453,6 +637,7 @@ class RouteMockFragment : Fragment() {
         } ?: getString(R.string.route_pace_unset)
         binding.routePaceHint.setText(if (pace != null && pace in RoutePace.MIN_SECONDS..RoutePace.MAX_SECONDS)
             R.string.route_pace_hint else R.string.route_pace_unsupported)
+        refreshRouteStride()
     }
 
     private fun savePace(seconds: Int) {
@@ -516,6 +701,18 @@ class RouteMockFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        diagnosticsDialog?.dismiss()
+        diagnosticsDialog = null
+        diagnosticsJob?.cancel()
+        diagnosticsJob = null
+        diagnosticsText = null
+        routeActionsDialog?.dismiss()
+        routeActionsDialog = null
+        _binding?.historicalRouteList?.adapter = null
+        routeAdapter = null
+        displayedRoutes = emptyList()
+        cadenceDialog?.dismiss()
+        cadenceDialog = null
         paceDialog?.dismiss()
         paceDialog = null
         _binding = null
@@ -523,7 +720,7 @@ class RouteMockFragment : Fragment() {
     }
 
     private fun showToast(message: String) = lifecycleScope.launch(Dispatchers.Main) {
-        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+        context?.let { Toast.makeText(it, message, Toast.LENGTH_SHORT).show() }
     }
 
     private fun updateMockButtonState(button: MaterialButton, text: String, iconRes: Int) =

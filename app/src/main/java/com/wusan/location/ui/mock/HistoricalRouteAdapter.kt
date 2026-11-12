@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.textview.MaterialTextView
 import com.wusan.location.R
+import java.util.Locale
 
 class HistoricalRouteAdapter(
     private val dataSet: MutableList<HistoricalRoute>,
@@ -22,6 +23,14 @@ class HistoricalRouteAdapter(
 
     operator fun get(position: Int): HistoricalRoute {
         return dataSet[position]
+    }
+
+    @SuppressLint("NotifyDataSetChanged")
+    fun replaceItems(items: List<HistoricalRoute>) {
+        val replacement = items.toList()
+        dataSet.clear()
+        dataSet.addAll(replacement)
+        notifyDataSetChanged()
     }
 
     fun removeItem(position: Int): HistoricalRoute {
@@ -44,13 +53,17 @@ class HistoricalRouteAdapter(
 
     @SuppressLint("SetTextI18n")
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        holder.name.text = dataSet[position].name
-        holder.route.text = dataSet[position].route.toString()
+        val item = dataSet[position]
+        holder.name.text = item.name
+        val first = item.route.firstOrNull()
+        holder.route.text = if (first == null) "0 个坐标点" else String.format(
+            Locale.ROOT, "%d 个坐标点 · 起点 %.5f, %.5f", item.route.size, first.first, first.second
+        )
         holder.root.setOnClickListener {
-            onItemClicked(dataSet[position], false)
+            onItemClicked(item, false)
         }
         holder.root.setOnLongClickListener {
-            onItemClicked(dataSet[position], true)
+            onItemClicked(item, true)
             true
         }
     }

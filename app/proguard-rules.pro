@@ -19,10 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
--keep class com.baidu.** {*;}
--keep class vi.com.** {*;}
--keep class com.baidu.vi.** {*;}
--dontwarn com.baidu.**
 
 -keepclassmembers class com.dd.StrokeGradientDrawable {
     public void setStrokeColor(int);
@@ -30,3 +26,12 @@
 
 -dontwarn com.tencent.bugly.**
 -keep public class com.tencent.bugly.**{*;}
+
+# 腾讯地图 SDK
+-keep public class com.tencent.lbssearch.** {*;}
+-keep public class com.tencent.map.** {*;}
+-keep public class com.tencent.mapsdk.** {*;}
+-keep public class com.tencent.tencentmap.** {*;}
+-keep public class com.tencent.tmsbeacon.** {*;}
+-dontwarn com.qq.**
+-dontwarn com.tencent.**

@@ -1,24 +1,25 @@
 package com.wusan.location.ext
 
-import com.baidu.location.BDLocation
-import com.baidu.location.Jni
-import com.baidu.mapapi.model.LatLng
+import com.tencent.tencentmap.mapsdk.maps.model.LatLng
+import com.wusan.location.tmap.GeoCoord
 
+/**
+ * 腾讯地图 LatLng（GCJ-02）→ 项目内部坐标（WGS-84）
+ */
 val LatLng.wgs84: Pair<Double, Double>
-    get() = Loc4j.gcj2wgs(latitude, longitude)
+    get() = GeoCoord.gcj2wgs(latitude, longitude)
 
-val BDLocation.wgs84: Pair<Double, Double>
-    get() = Loc4j.gcj2wgs(latitude, longitude)
-
+/**
+ * 项目内部坐标（WGS-84）→ 腾讯地图 LatLng（GCJ-02）
+ */
 val Pair<Double, Double>.gcj02: LatLng
-    get() = Loc4j.wgs2gcj(first, second).let { LatLng(it.first, it.second) }
+    get() = GeoCoord.wgs2gcj(first, second).let { LatLng(it.first, it.second) }
 
+/**
+ * 保留旧调用名，内部改为自有实现，不再依赖百度 JNI。
+ */
 object Loc4j {
-    fun gcj2wgs(lat: Double, lon: Double): Pair<Double, Double> {
-        return Jni.coorEncrypt(lon, lat, "gcj2wgs").let { it[1] to it[0] }
-    }
+    fun gcj2wgs(lat: Double, lon: Double): Pair<Double, Double> = GeoCoord.gcj2wgs(lat, lon)
 
-    fun wgs2gcj(lat: Double, lon: Double): Pair<Double, Double> {
-        return Jni.coorEncrypt(lon, lat, "gps2gcj").let { it[1] to it[0] }
-    }
+    fun wgs2gcj(lat: Double, lon: Double): Pair<Double, Double> = GeoCoord.wgs2gcj(lat, lon)
 }

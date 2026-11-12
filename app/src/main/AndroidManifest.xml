@@ -65,16 +65,16 @@
             android:name=".service.StepConfigAccessReceiver"
             android:exported="true" />
 
-        <!-- 百度地图定位服务 -->
+        <!-- User-started location simulation; no automatic restart after process death. -->
         <service
-            android:name="com.baidu.location.f"
-            android:enabled="true"
-            android:foregroundServiceType="location"
-            android:process=":remote"
-            tools:ignore="ForegroundServicePermission" />
+            android:name=".service.MockRuntimeService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!-- 腾讯地图 Key（地图显示与地点检索共用） -->
         <meta-data
-            android:name="com.baidu.lbsapi.API_KEY"
-            android:value="UzCD3gLYg3M9Ue2749hm1jsHX2DyfMUF" />
+            android:name="TencentMapSDK"
+            android:value="IP5BZ-AELL7-XH3XG-P3PZC-CJU25-YSB7D" />
 
         <!-- Xposed 模块配置 -->
         <meta-data

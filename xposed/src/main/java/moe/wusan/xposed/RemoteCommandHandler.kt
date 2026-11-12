@@ -9,9 +9,13 @@ import moe.wusan.dobby.Dobby
 import moe.wusan.xposed.hooks.LocationServiceHook
 import moe.wusan.xposed.utils.FakeLoc
 import moe.wusan.xposed.utils.RouteSampleClock
+import moe.wusan.xposed.utils.RoutePositionJitter
+import moe.wusan.xposed.utils.RouteLocationHistory
 import moe.wusan.xposed.utils.BinderUtils
 import moe.wusan.xposed.utils.Logger
+import moe.wusan.xposed.utils.LocationDeliveryDiagnostics
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
 object RemoteCommandHandler {
@@ -19,6 +23,7 @@ object RemoteCommandHandler {
     private val needProxyCmd = arrayOf("start", "stop", "set_speed_amp", "set_altitude", "set_speed", "update_location", "set_bearing", "move", "put_config", "route_step", "stop_motion")
     internal val randomKey by lazy { "portal_" + Random.nextDouble() }
     private var isLoadedLibrary = false
+    private val lastMovementLogNanos = AtomicLong()
 
     @SuppressLint("UnsafeDynamicallyLoadedCode")
     fun handleInstruction(command: String, rely: Bundle): Boolean {
@@ -52,7 +57,12 @@ object RemoteCommandHandler {
         }
 
         if (FakeLoc.enableDebugLog) {
-            Logger.debug("commandId=$commandId, rely=$rely")
+            val frequent = commandId in arrayOf("route_step", "move", "get_location", "is_start", "broadcast_location", "get_delivery_diagnostics")
+            val now = SystemClock.elapsedRealtimeNanos()
+            val previous = lastMovementLogNanos.get()
+            if (!frequent || (now - previous >= 1_000_000_000L &&
+                    lastMovementLogNanos.compareAndSet(previous, now)))
+                Logger.debug("commandId=$commandId, rely=$rely")
         }
 
         when (commandId) {
@@ -68,8 +78,12 @@ object RemoteCommandHandler {
                 val altitude = rely.getDouble("altitude", FakeLoc.altitude)
                 val accuracy = rely.getFloat("accuracy", FakeLoc.accuracy)
 
-                FakeLoc.motion = FakeLoc.Motion()
-                FakeLoc.enable = true
+                synchronized(FakeLoc) {
+                    RouteLocationHistory.clear()
+                    LocationDeliveryDiagnostics.reset()
+                    FakeLoc.motion = FakeLoc.Motion()
+                    FakeLoc.enable = true
+                }
                 if (isLoadedLibrary) {
                     Dobby.setStatus(true)
                 }
@@ -81,8 +95,11 @@ object RemoteCommandHandler {
                 return true
             }
             "stop" -> {
-                FakeLoc.enable = false
-                FakeLoc.motion = FakeLoc.Motion()
+                synchronized(FakeLoc) {
+                    FakeLoc.enable = false
+                    FakeLoc.motion = FakeLoc.Motion()
+                    RouteLocationHistory.clear()
+                }
                 FakeLoc.hasBearings = false
                 if (isLoadedLibrary) {
                     Dobby.setStatus(false)
@@ -122,6 +139,20 @@ object RemoteCommandHandler {
                     rely.putDouble("lat", FakeLoc.latitude)
                     rely.putDouble("lon", FakeLoc.longitude)
                 }
+                return true
+            }
+            "get_delivery_diagnostics" -> {
+                val diagnostics = LocationServiceHook.deliveryDiagnostics()
+                rely.putInt("diag_version", 1)
+                rely.putLong("diag_delivered_points", diagnostics.deliveredPoints)
+                rely.putInt("diag_listener_count", diagnostics.listenerCount)
+                rely.putLong("diag_max_sample_gap_ms", diagnostics.maxSampleGapMs)
+                rely.putLong("diag_max_delivery_delay_ms", diagnostics.maxDeliveryDelayMs)
+                rely.putInt("diag_pending_points", diagnostics.pendingPoints)
+                rely.putString("diag_last_error", diagnostics.lastError)
+                rely.putLong("diag_last_error_at_millis", diagnostics.lastErrorAtMillis)
+                rely.putLong("diag_since_elapsed_ms", diagnostics.sinceElapsedMs)
+                rely.putLong("diag_captured_elapsed_ms", diagnostics.capturedElapsedMs)
                 return true
             }
             "get_listener_size" -> {
@@ -195,7 +226,7 @@ object RemoteCommandHandler {
                     rely.getLong("sample_nanos"), rely.getLong("sample_millis"),
                     SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis(),
                 )
-                synchronized(FakeLoc) {
+                val updated = synchronized(FakeLoc) {
                     bearing?.let {
                         FakeLoc.bearing = it
                         FakeLoc.hasBearings = true
@@ -203,6 +234,7 @@ object RemoteCommandHandler {
                     updateCoordinate(lat, lon, speed, route = true,
                         atNanos = sampleTime.nanos, atMillis = sampleTime.millis)
                 }
+                if (!updated) return false
                 if (FakeLoc.isSystemServerProcess) LocationServiceHook.callOnLocationChanged()
                 return true
             }
@@ -213,6 +245,7 @@ object RemoteCommandHandler {
                         atNanos = SystemClock.elapsedRealtimeNanos(),
                         atMillis = System.currentTimeMillis(),
                     )
+                    recordRouteSample()
                 }
                 if (FakeLoc.enable && FakeLoc.isSystemServerProcess) LocationServiceHook.callOnLocationChanged()
                 return true
@@ -301,6 +334,7 @@ object RemoteCommandHandler {
                 rely.putDouble("actual_speed", motion.speed)
                 rely.putLong("motion_at_nanos", motion.atNanos)
                 rely.putLong("motion_at_millis", motion.atMillis)
+                rely.putLong("position_clock_nanos", motion.positionClockNanos)
                 rely.putBoolean("route_motion", motion.route)
                 rely.putBoolean("has_bearings", FakeLoc.hasBearings)
                 rely.putDouble("bearing", FakeLoc.bearing)
@@ -380,12 +414,36 @@ object RemoteCommandHandler {
             return false
         }
         synchronized(FakeLoc) {
+            val previous = FakeLoc.motion
+            if (route && previous.route && atNanos <= previous.atNanos) return false
+            val positionClock = if (route) RoutePositionJitter.advanceClock(
+                previous.positionClockNanos, previous.atNanos, atNanos,
+                previous.route, previous.speed,
+            ) else 0L
             FakeLoc.latitude = newLat
             FakeLoc.longitude = newLon
             FakeLoc.motion = FakeLoc.Motion(
-                speed, atNanos, route, atMillis,
+                speed, atNanos, route, atMillis, positionClock,
             )
+            if (route) recordRouteSample() else RouteLocationHistory.clear()
         }
         return true
+    }
+
+    /** Caller holds FakeLoc: commit canonical geometry and the matching clocks as one snapshot. */
+    private fun recordRouteSample() {
+        val motion = FakeLoc.motion
+        if (!motion.route) return
+        RouteLocationHistory.record(RouteLocationHistory.Sample(
+            latitude = FakeLoc.latitude,
+            longitude = FakeLoc.longitude,
+            altitude = FakeLoc.altitude.takeIf { it.isFinite() } ?: 80.0,
+            accuracy = FakeLoc.accuracy.takeIf { it.isFinite() && it >= 0f } ?: 5.0f,
+            speed = motion.speed,
+            bearing = (FakeLoc.bearing % 360.0 + 360.0) % 360.0,
+            atNanos = motion.atNanos,
+            atMillis = motion.atMillis,
+            positionClockNanos = motion.positionClockNanos,
+        ))
     }
 }

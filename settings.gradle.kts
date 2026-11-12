@@ -14,6 +14,8 @@ dependencyResolutionManagement {
         mavenCentral()
         maven { url = uri("https://api.xposed.info/") }
         maven { url = uri("https://jitpack.io") }
+        // 腾讯地图 SDK 发布在 sonatype 公共仓库
+        maven { url = uri("https://oss.sonatype.org/content/groups/public") }
     }
 }
 rootProject.name = "Location"

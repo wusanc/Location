@@ -3,7 +3,7 @@ package com.wusan.location.ext
 import android.content.Context
 import androidx.core.content.edit
 import com.alibaba.fastjson2.JSON
-import com.baidu.mapapi.map.BaiduMap
+import com.tencent.tencentmap.mapsdk.maps.TencentMap
 import com.wusan.location.ui.mock.HistoricalLocation
 import com.wusan.location.ui.mock.HistoricalRoute
 import moe.wusan.xposed.utils.FakeLoc
@@ -84,7 +84,7 @@ var Context.minSatelliteCount: Int
     }
 
 var Context.mapType: Int
-    get() = sharedPrefs.getInt("mapType", BaiduMap.MAP_TYPE_NORMAL)
+    get() = sharedPrefs.getInt("mapType", TencentMap.MAP_TYPE_NORMAL)
     set(value) = sharedPrefs.edit {
         putInt("mapType", value)
     }

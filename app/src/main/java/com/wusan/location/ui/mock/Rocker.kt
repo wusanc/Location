@@ -3,6 +3,7 @@ package com.wusan.location.ui.mock
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.os.Build
 import android.view.Gravity
@@ -10,7 +11,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.Toast
+import androidx.appcompat.view.ContextThemeWrapper
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.cardview.widget.CardView
 import com.wusan.location.R
@@ -19,9 +20,12 @@ import com.wusan.location.ext.rockerCoords
 
 
 @SuppressLint("RtlHardcoded", "ClickableViewAccessibility")
-class Rocker(private var activity: Activity) : View.OnTouchListener {
+class Rocker(context: Context) : View.OnTouchListener {
+    private var themedContext = ContextThemeWrapper(context.applicationContext, R.style.AppTheme).apply {
+        applyOverrideConfiguration(Configuration(context.resources.configuration))
+    }
     private val root by lazy {
-        LayoutInflater.from(activity).inflate(R.layout.layout_rocker, null)!!
+        LayoutInflater.from(themedContext).inflate(R.layout.layout_rocker, null)!!
     }
     private val layoutParams by lazy {
         WindowManager.LayoutParams(
@@ -29,13 +33,14 @@ class Rocker(private var activity: Activity) : View.OnTouchListener {
             0, 0, PixelFormat.TRANSPARENT
         )
     }
-    private val windowManager by lazy { activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager }
+    private val windowManager by lazy { themedContext.applicationContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager }
     private var startX = 0
     private var startY = 0
 
     var isStart = false
     var isHide = false
     private var autoCardVisible = false
+    private var suppressAutoCallbacks = false
     var autoStatus = false
         get() = field
         set(value) {
@@ -58,7 +63,7 @@ class Rocker(private var activity: Activity) : View.OnTouchListener {
             layoutParams.type = WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        val rockerCoords = activity.rockerCoords
+        val rockerCoords = themedContext.rockerCoords
         layoutParams.format = PixelFormat.RGBA_8888
         layoutParams.gravity = Gravity.LEFT or Gravity.TOP
         layoutParams.x = rockerCoords.first
@@ -110,13 +115,24 @@ class Rocker(private var activity: Activity) : View.OnTouchListener {
         } else {
             root.findViewById<View>(R.id.auto_play)
                 .setBackgroundResource(R.drawable.baseline_play_24)
-            upController()
+            if (!suppressAutoCallbacks) upController()
         }
         tintControlIcon(root.findViewById(R.id.auto_play))
-        autoListener?.onAutoPlay(autoStatus)
+        if (!suppressAutoCallbacks) autoListener?.onAutoPlay(autoStatus)
         rockerView.auto(autoStatus)
     }
     
+    /** Reflect runtime state without sending another pause/resume command. */
+    fun syncAutoStatus(value: Boolean) {
+        val previous = suppressAutoCallbacks
+        suppressAutoCallbacks = true
+        try {
+            autoStatus = value
+        } finally {
+            suppressAutoCallbacks = previous
+        }
+    }
+
     private fun switchHide(rockerView: RockerView, autoView: AppCompatImageView) {
         if (isHide) {
             if(!autoCardVisible)root.findViewById<View>(R.id.auto).callOnClick()
@@ -131,16 +147,18 @@ class Rocker(private var activity: Activity) : View.OnTouchListener {
     private fun tintControlIcon(view: View) {
         view.background?.mutate()?.let {
             androidx.core.graphics.drawable.DrawableCompat.setTint(it,
-                androidx.core.content.ContextCompat.getColor(activity, R.color.wechat_text_primary))
+                androidx.core.content.ContextCompat.getColor(themedContext, R.color.wechat_text_primary))
             view.background = it
         }
     }
 
     /** Update an attached overlay without resetting its input or the running route. */
     fun refreshAppearance(activity: Activity) {
-        this.activity = activity
-        val foreground = androidx.core.content.ContextCompat.getColor(activity, R.color.wechat_text_primary)
-        val surface = androidx.core.content.ContextCompat.getColor(activity, R.color.wechat_surface)
+        themedContext = ContextThemeWrapper(activity.applicationContext, R.style.AppTheme).apply {
+            applyOverrideConfiguration(Configuration(activity.resources.configuration))
+        }
+        val foreground = androidx.core.content.ContextCompat.getColor(themedContext, R.color.wechat_text_primary)
+        val surface = androidx.core.content.ContextCompat.getColor(themedContext, R.color.wechat_surface)
         fun update(view: View) {
             if (view is CardView) view.setCardBackgroundColor(surface)
             if (view is android.widget.TextView) view.setTextColor(foreground)
@@ -187,7 +205,7 @@ class Rocker(private var activity: Activity) : View.OnTouchListener {
     }
 
     fun savePosition() {
-        activity.rockerCoords = Pair(layoutParams.x, layoutParams.y)
+        themedContext.rockerCoords = Pair(layoutParams.x, layoutParams.y)
     }
 
     fun updateView() {

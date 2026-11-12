@@ -112,27 +112,7 @@ class MockFragment : Fragment() {
                 }
             }
 
-            rocker.setRockerListener(object: RockerView.Companion.OnMoveListener {
-                override fun onAngle(angle: Double) {
-                    MockServiceHelper.setBearing(locationManager!!, angle)
-                    FakeLoc.bearing = angle
-                    FakeLoc.hasBearings = true
-                }
 
-                override fun onLockChanged(isLocked: Boolean) {
-                    isRockerLocked = isLocked
-                }
-
-                override fun onFinished() {
-                    if (!isRockerLocked) {
-                        rockerCoroutineController.pause()
-                    }
-                }
-
-                override fun onStarted() {
-                    rockerCoroutineController.resume()
-                }
-            })
         }
 
         requireContext().selectLocation?.let {

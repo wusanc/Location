@@ -24,7 +24,7 @@ object LocationManagerHook: BaseLocationHook() {
                     Logger.debug("${param.method.name}: injected!")
                 }
 
-                param.result = injectLocation(param.result as Location)
+                param.result = injectLatestLocation(param.result as Location)
             }
         }
         if(cLocationManager.declaredMethods.filter {
@@ -51,7 +51,7 @@ object LocationManagerHook: BaseLocationHook() {
                     }
                     is List<*> -> {
                         val locations = param.args[0] as List<*>
-                        param.args[0] = locations.map { injectLocation(it as Location) }
+                        param.args[0] = injectLocations(locations.filterIsInstance<Location>())
                     }
                     else -> {
                         Logger.error("Unknown method when hook hookOnLocation: ${param.method}")
@@ -65,7 +65,7 @@ object LocationManagerHook: BaseLocationHook() {
             }.map {
                 XposedBridge.hookMethod(it, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam?) {
-                        if (param == null || param.args.size > 1 || param.args[1] == null) return
+                        if (param == null || param.args.size < 2 || param.args[1] == null) return
 
                         val listener = param.args[1]
                         listener.javaClass.onceHookAllMethod("onLocationChanged", hookOnLocation)
@@ -77,7 +77,7 @@ object LocationManagerHook: BaseLocationHook() {
 
         val hookRequestLocationUpdates = object: XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam?) {
-                if (param == null || param.args.isEmpty() || param.args[1] == null) return
+                if (param == null || param.args.size < 2 || param.args[1] == null) return
 
                 param.args.filterIsInstance<android.location.LocationListener>().also {
                     if (it.isEmpty()) {

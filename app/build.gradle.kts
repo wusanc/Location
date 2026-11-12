@@ -42,12 +42,8 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            excludes += "lib/armeabi/**"
-            excludes += "lib/x86/**"
-            excludes += "lib/x86_64/libBaiduMapSDK**"
-            excludes += "lib/x86_64/libc++_shared.so"
-            excludes += "lib/x86_64/liblocSDK8b.so"
-            excludes += "lib/x86_64/libtiny_magic.so"
+            // 多个 SDK 都带 libc++_shared.so，打包时取第一个即可
+            pickFirsts += "lib/*/libc++_shared.so"
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -81,5 +77,12 @@ dependencies {
     implementation(libs.kotlin.reflect)
     implementation(libs.bugly)
     implementation(libs.geotools)
+
+    // 腾讯地图 SDK（地图显示）
+    // 注意：6.x 需要额外的 com.tencent.openmap:foundation，而它内置了 Bugly，
+    // 会和本项目自己的 com.tencent.bugly:crashreport 产生重复类，故使用 5.x 版本线。
+    implementation(libs.tencent.map.vector)
+    implementation(libs.tencent.map.utilities)
+
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 }

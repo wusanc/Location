@@ -24,6 +24,10 @@ import com.wusan.location.ext.reportDuration
 import com.wusan.location.ext.loopBroadcastlocation
 import moe.wusan.xposed.utils.FakeLoc
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 object MockServiceHelper {
     const val PROVIDER_NAME = "portal"
@@ -116,13 +120,24 @@ object MockServiceHelper {
         return locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, rely)
     }
 
-    fun tryOpenMock(
+    suspend fun tryOpenMock(
         locationManager: LocationManager,
         speed: Double,
         altitude: Double,
         accuracy: Float,
     ): Boolean {
         if (!::randomKey.isInitialized) {
+            return false
+        }
+        val context = Portal.appContext
+        withContext(Dispatchers.Main.immediate) { MockRuntime.prepareSession() }
+        if (!MockRuntimeService.ensureStarted(context)) return false
+        val ready = withTimeoutOrNull(5_000L) {
+            MockRuntime.state.first { it.serviceRunning || it.phase == RuntimePhase.ERROR }
+        }
+        if (ready?.serviceRunning != true) {
+            MockRuntime.startFailed(ready?.error ?: "前台运行服务启动超时")
+            MockRuntimeService.requestStop(context)
             return false
         }
         val rely = Bundle()
@@ -132,7 +147,13 @@ object MockServiceHelper {
         rely.putFloat("accuracy", accuracy)
         val started = locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, rely) &&
             isMockStart(locationManager)
-        if (started) startLoopBroadcastLocation(locationManager)
+        if (started) {
+            startLoopBroadcastLocation(locationManager)
+            MockRuntime.onMockOpened()
+        } else {
+            MockRuntime.startFailed("系统模拟服务启动失败")
+            MockRuntimeService.requestStop(context)
+        }
         return started
     }
 
@@ -144,9 +165,18 @@ object MockServiceHelper {
         rely.putString("command_id", "stop")
         stopLoopBroadcastLocation()
         if (locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, rely)) {
-            return !isMockStart(locationManager)
+            val stopped = !isMockStart(locationManager)
+            if (stopped) MockRuntime.onMockClosed()
+            return stopped
         }
         return false
+    }
+
+    /** Read-only system-side callback diagnostics. Null also supports older installed modules. */
+    fun getDeliveryDiagnostics(locationManager: LocationManager): Bundle? {
+        if (!::randomKey.isInitialized) return null
+        val packet = Bundle().apply { putString("command_id", "get_delivery_diagnostics") }
+        return if (locationManager.sendExtraCommand(PROVIDER_NAME, randomKey, packet)) packet else null
     }
 
     fun getLocation(locationManager: LocationManager): Pair<Double, Double>? {

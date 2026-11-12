@@ -121,12 +121,12 @@ object GnssHook: BaseLocationHook() {
             BlindHookLocation(cGnssNative, classLoader)
 
             cGnssNative.hookAllMethods("reportLocationBatch", beforeHook {
-                if (FakeLoc.enable && args.size > 1 && args[0] is Array<*>) {
-                    val locations = args[0] as Array<Location>
-                    locations.forEachIndexed { index, location ->
-                        locations[index] = injectLocation(location)
-                    }
-                }
+                if (!FakeLoc.enable || args.isEmpty()) return@beforeHook
+                val locations = args[0] as? Array<*> ?: return@beforeHook
+                runCatching {
+                    require(locations.all { it is Location }) { "Invalid GNSS native batch" }
+                    args[0] = injectLocations(locations.filterIsInstance<Location>()).toTypedArray()
+                }.onFailure { Logger.warn("Failed to transform GNSS native locations", it) }
             })
         } else {
             Logger.error("GnssNative not found")

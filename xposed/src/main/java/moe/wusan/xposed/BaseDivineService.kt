@@ -109,6 +109,7 @@ abstract class BaseDivineService {
                 rely.getLong("motion_at_nanos", 0L),
                 rely.getBoolean("route_motion", false),
                 rely.getLong("motion_at_millis", 0L),
+                rely.getLong("position_clock_nanos", 0L),
             )
             FakeLoc.hasBearings = rely.getBoolean("has_bearings", FakeLoc.hasBearings)
             FakeLoc.bearing = rely.getDouble("bearing", FakeLoc.bearing)

@@ -51,33 +51,21 @@ import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
-import com.baidu.mapapi.map.BitmapDescriptorFactory
-import com.baidu.mapapi.map.InfoWindow
-import com.baidu.mapapi.map.MapStatusUpdateFactory
-import com.baidu.mapapi.map.MarkerOptions
-import com.baidu.mapapi.map.MyLocationConfiguration
-import com.baidu.mapapi.model.LatLng
-import com.baidu.mapapi.search.core.SearchResult
-import com.baidu.mapapi.search.geocode.GeoCodeResult
-import com.baidu.mapapi.search.geocode.GeoCoder
-import com.baidu.mapapi.search.geocode.OnGetGeoCoderResultListener
-import com.baidu.mapapi.search.geocode.ReverseGeoCodeResult
-import com.baidu.mapapi.search.sug.SuggestionSearch
-import com.baidu.mapapi.search.sug.SuggestionSearchOption
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.tencent.bugly.crashreport.CrashReport
+import com.tencent.tencentmap.mapsdk.maps.CameraUpdateFactory
+import com.tencent.tencentmap.mapsdk.maps.model.MarkerOptions
 import kotlinx.coroutines.launch
 import com.wusan.location.android.permission.RequestPermissions
 import com.wusan.location.android.root.ShellUtils
 import com.wusan.location.android.window.OverlayUtils
 import com.wusan.location.bdmap.Poi
-import com.wusan.location.bdmap.toPoi
 import com.wusan.location.databinding.ActivityMainBinding
 import com.wusan.location.ext.gcj02
-import com.wusan.location.ext.wgs84
+import com.wusan.location.tmap.TencentGeo
 import com.wusan.location.ui.notification.NotificationUtils
 import com.wusan.location.ui.settings.AppearanceSettings
-import com.wusan.location.ui.viewmodel.BaiduMapViewModel
+import com.wusan.location.ui.viewmodel.MapViewModel
 import com.wusan.location.ui.viewmodel.MockServiceViewModel
 
 class MainActivity : AppCompatActivity() {
@@ -87,9 +75,8 @@ class MainActivity : AppCompatActivity() {
     /* Permission */
     private val requestMultiplePermissions = RequestPermissions(this)
 
-    /* BaiduMap */
-    private var mSuggestionSearch: SuggestionSearch? = null
-    private val baiduMapViewModel by viewModels<BaiduMapViewModel>()
+    /* Map */
+    private val mapViewModel by viewModels<MapViewModel>()
     private val mockServiceViewModel by viewModels<MockServiceViewModel>()
 
     private fun getRequiredPermissions(): MutableSet<String> {
@@ -215,28 +202,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        baiduMapViewModel.mGeoCoder = GeoCoder.newInstance()
-        baiduMapViewModel.mGeoCoder?.setOnGetGeoCodeResultListener(object: OnGetGeoCoderResultListener {
-            override fun onGetGeoCodeResult(geoCodeResult: GeoCodeResult) {}
-
-            override fun onGetReverseGeoCodeResult(reverseGeoCodeResult: ReverseGeoCodeResult) {
-                if (reverseGeoCodeResult.error != SearchResult.ERRORNO.NO_ERROR) {
-                    Log.e("MainActivity", "Reverse GeoCode error: ${reverseGeoCodeResult.error}")
-                } else with(baiduMapViewModel) {
-                    markName = reverseGeoCodeResult.address.toString()
-
-                    if (showDetailView) {
-                        showDetailInfo(reverseGeoCodeResult.location.wgs84, reverseGeoCodeResult.location)
-                    }
-                }
-            }
-        })
-
         mockServiceViewModel.initRocker(this)
     }
 
     private fun initNotification() {
-        with(baiduMapViewModel) {
+        with(mapViewModel) {
             mNotification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val notificationUtils = NotificationUtils(this@MainActivity)
                 val builder = notificationUtils.getAndroidChannelNotification(
@@ -334,19 +304,17 @@ class MainActivity : AppCompatActivity() {
         ImageViewCompat.setImageTintList(voiceBack, color)
 
         val mSearchList = binding.searchListView
-        mSearchList.onItemClickListener = OnItemClickListener { parent, view, pos, id ->
+        mSearchList.onItemClickListener = OnItemClickListener { _, view, _, _ ->
             val lngText = (view.findViewById<View>(R.id.poi_longitude) as TextView).text.toString()
             val latText = (view.findViewById<View>(R.id.poi_latitude) as TextView).text.toString()
-            with(baiduMapViewModel) {
+            with(mapViewModel) {
                 markName = (view.findViewById<View>(R.id.poi_name) as TextView).text.toString()
 
                 val lng = lngText.toDouble() // wgs84
                 val lat = latText.toDouble()
                 markedLoc = lat to lng
                 if (isExists) {
-                    val gcjLoc = markedLoc!!.gcj02
-                    val location = LatLng(gcjLoc.latitude, gcjLoc.longitude)
-                    baiduMap.setMapStatus(MapStatusUpdateFactory.newLatLng(location))
+                    tencentMap.moveCamera(CameraUpdateFactory.newLatLng(markedLoc!!.gcj02))
                 } else {
                     Toast.makeText(this@MainActivity, "地图未加载", Toast.LENGTH_SHORT).show()
                 }
@@ -357,58 +325,18 @@ class MainActivity : AppCompatActivity() {
                 searchItem.collapseActionView()
             }
         }
-        if (mSuggestionSearch == null) {
-            mSuggestionSearch = SuggestionSearch.newInstance()
-            mSuggestionSearch?.setOnGetSuggestionResultListener { suggestionResult ->
-                if (suggestionResult == null || suggestionResult.allSuggestions == null) {
-                    Toast.makeText(this@MainActivity, "未搜索到相关位置", Toast.LENGTH_SHORT).show()
-                } else {
-                    val data = suggestionResult.toPoi(
-                        baiduMapViewModel.currentLocation
-                    ).map { it.toMap() } // wgs84
-
-                    val simAdapt = SimpleAdapter(
-                        this@MainActivity, data,
-                        R.layout.layout_search_poi_item,
-                        arrayOf(Poi.KEY_NAME, Poi.KEY_ADDRESS, Poi.KEY_LONGITUDE_RAW, Poi.KEY_LATITUDE_RAW, Poi.KEY_TAG),
-                        intArrayOf(R.id.poi_name, R.id.poi_address, R.id.poi_longitude, R.id.poi_latitude, R.id.poi_tag)
-                    )
-                    mSearchList.setAdapter(simAdapt)
-                    binding.searchLinear.visibility = View.VISIBLE
-                }
-            }
-        }
 
         searchView.setOnQueryTextListener(object: SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String?): Boolean {
                 if (query.isNullOrBlank()) return false
-                try {
-                    mSuggestionSearch!!.requestSuggestion(SuggestionSearchOption()
-                        .keyword(query)
-                        .city(mCityString)
-                    )
-
-                    baiduMapViewModel.baiduMap.clear()
-                    binding.searchLinear.visibility = View.INVISIBLE
-                } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "搜索出错", Toast.LENGTH_SHORT).show()
-                    Log.e("MainActivity", "Search error: ${e.stackTraceToString()}")
-                }
+                searchPoi(query)
+                binding.searchLinear.visibility = View.INVISIBLE
                 return true
             }
 
             override fun onQueryTextChange(newText: String?): Boolean {
                 if (!newText.isNullOrBlank()) {
-                    try {
-                        mSuggestionSearch!!.requestSuggestion(
-                            SuggestionSearchOption()
-                                .keyword(newText)
-                                .city(mCityString)
-                        )
-                    } catch (e: Exception) {
-                        Toast.makeText(this@MainActivity, "搜索出错", Toast.LENGTH_SHORT).show()
-                        Log.e("MainActivity", "Search error: ${e.stackTraceToString()}")
-                    }
+                    searchPoi(newText)
                 } else {
                     binding.searchLinear.visibility = View.GONE
                 }
@@ -418,36 +346,54 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    private fun markMap() = with(baiduMapViewModel) {
-        if (markedLoc == null) return
-
-        if (perspectiveState == MyLocationConfiguration.LocationMode.FOLLOWING) {
-            perspectiveState = MyLocationConfiguration.LocationMode.NORMAL
-        }
-
-        val gcjLoc = markedLoc!!.gcj02
-        val ooA = MarkerOptions()
-            .position(gcjLoc)
-            .apply {
-                if (mMapIndicator != null)
-                    icon(mMapIndicator)
+    private fun searchPoi(keyword: String) {
+        TencentGeo.suggest(this, keyword, mCityString) { pois ->
+            runOnUiThread {
+                if (pois.isEmpty()) {
+                    Toast.makeText(this, "未搜索到相关位置", Toast.LENGTH_SHORT).show()
+                    return@runOnUiThread
+                }
+                val data = pois.map { it.toMap() }
+                val simAdapt = SimpleAdapter(
+                    this, data,
+                    R.layout.layout_search_poi_item,
+                    arrayOf(
+                        Poi.KEY_NAME,
+                        Poi.KEY_ADDRESS,
+                        Poi.KEY_LONGITUDE_RAW,
+                        Poi.KEY_LATITUDE_RAW,
+                        Poi.KEY_TAG
+                    ),
+                    intArrayOf(
+                        R.id.poi_name,
+                        R.id.poi_address,
+                        R.id.poi_longitude,
+                        R.id.poi_latitude,
+                        R.id.poi_tag
+                    )
+                )
+                binding.searchListView.adapter = simAdapt
+                binding.searchLinear.visibility = View.VISIBLE
             }
-        baiduMap.clear()
-        baiduMap.addOverlay(ooA)
-
-        showDetailInfo(markedLoc!!, gcjLoc)
+        }
     }
 
-    @SuppressLint("SetTextI18n")
-    private fun showDetailInfo(wgsLoc: Pair<Double, Double>, gcjLoc: LatLng) {
-        val infoView = layoutInflater.inflate(R.layout.layout_loc_detail, null)
-        val locDetail = infoView.findViewById<TextView>(R.id.loc_detail)
-        locDetail.text = "${wgsLoc.second.toString().take(10)}, ${wgsLoc.first.toString().take(10)}"
-        val locAddr = infoView.findViewById<TextView>(R.id.loc_addr)
-        locAddr.text = baiduMapViewModel.markName ?: "未知地址"
-        val mInfoWindow = InfoWindow(BitmapDescriptorFactory.fromView(infoView), gcjLoc, -95, null)
+    private fun markMap() {
+        with(mapViewModel) {
+            if (markedLoc == null) return
 
-        baiduMapViewModel.baiduMap.showInfoWindow(mInfoWindow)
+            followLocation = false
+
+            val gcjLoc = markedLoc!!.gcj02
+            tencentMap.clearAllOverlays()
+            tencentMap.addMarker(
+                MarkerOptions()
+                    .position(gcjLoc)
+                    .apply {
+                        mMapIndicator?.let { icon(it) }
+                    }
+            )
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -457,8 +403,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-
-        mSuggestionSearch?.destroy()
     }
 
     companion object {

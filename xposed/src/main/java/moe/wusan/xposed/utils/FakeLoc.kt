@@ -52,7 +52,7 @@ object FakeLoc {
     /**
      * 如果TelephonyHook失效，可能需要打开此开关
      */
-    var disableFusedLocation = true
+    var disableFusedLocation = false
     var disableNetworkLocation = true
 
     var disableRequestGeofence = false
@@ -110,6 +110,8 @@ object FakeLoc {
         val atNanos: Long = 0,
         val route: Boolean = false,
         val atMillis: Long = 0,
+        // Active route time drives output drift; pauses must not advance its phase.
+        val positionClockNanos: Long = 0,
     ) {
         fun isFresh(nowNanos: Long): Boolean = nowNanos - atNanos in 0L until 2_000_000_000L
 

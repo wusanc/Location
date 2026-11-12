@@ -1,8 +1,6 @@
 package moe.wusan.xposed.hooks
 
 import android.location.Location
-import android.location.LocationManager
-import android.os.Build
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -14,9 +12,9 @@ import moe.wusan.xposed.utils.hookAllMethodsAfter
 import moe.wusan.xposed.utils.hookAllMethodsBefore
 import moe.wusan.xposed.utils.toClass
 import moe.wusan.xposed.utils.toClassOrThrow
-import kotlin.random.Random
 
 object BasicLocationHook: BaseLocationHook() {
+    private val transformingSet = ThreadLocal.withInitial { false }
     operator fun invoke(classLoader: ClassLoader) {
 //        val hookSetLatitude = object: XC_MethodHook() {
 //            override fun beforeHookedMethod(param: MethodHookParam?) {
@@ -42,71 +40,41 @@ object BasicLocationHook: BaseLocationHook() {
             cLocationResult.hookAllMethodsAfter("asList") {
                 if (!FakeLoc.enable) return@hookAllMethodsAfter
 
-                val locations = result as List<*>
-                result = locations.map { injectLocation(it as Location) }
+                val locations = result as? List<*> ?: return@hookAllMethodsAfter
+                runCatching {
+                    require(locations.all { it is Location }) { "Invalid LocationResult batch" }
+                    result = injectLocations(locations.filterIsInstance<Location>())
+                }.onFailure { Logger.warn("Failed to transform LocationResult.asList", it) }
             }
 
             cLocationResult.hookAllMethodsBefore("writeToParcel") {
                 if (!FakeLoc.enable) return@hookAllMethodsBefore
 
-                val locationResult = thisObject
-                val mLocationsField = XposedHelpers.findFieldIfExists(locationResult.javaClass, "mLocations")
-                if (mLocationsField == null) {
-                    Logger.error("Failed to find mLocations in LocationResult")
-                    return@hookAllMethodsBefore
-                }
-                mLocationsField.isAccessible = true
-                val mLocations = mLocationsField.get(locationResult) as ArrayList<*>
-
-                val originLocation = mLocations.firstOrNull() as? Location
-                    ?: Location(LocationManager.GPS_PROVIDER)
-
-                val location = Location(originLocation.provider)
-
-                val jitterLat = FakeLoc.jitterLocation()
-                location.latitude = jitterLat.first
-                location.longitude = jitterLat.second
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    location.isMock = false
-                }
-                location.altitude = FakeLoc.altitude
-                location.speed = originLocation.speed
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    location.speedAccuracyMetersPerSecond = 0F
-                }
-
-                location.time = originLocation.time
-                location.accuracy = originLocation.accuracy
-                var modBearing = FakeLoc.bearing % 360.0 + 0.0
-                if (modBearing < 0) {
-                    modBearing += 360.0
-                }
-                if (location.hasBearing()) {
-                    location.bearing = modBearing.toFloat()
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    location.bearingAccuracyDegrees = modBearing.toFloat()
-                }
-                location.elapsedRealtimeNanos = originLocation.elapsedRealtimeNanos
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    location.elapsedRealtimeUncertaintyNanos = originLocation.elapsedRealtimeUncertaintyNanos
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    location.verticalAccuracyMeters = originLocation.verticalAccuracyMeters
-                }
-                originLocation.extras?.let {
-                    location.extras = it
-                }
-
-                mLocationsField.set(locationResult, arrayListOf(location))
+                runCatching {
+                    val locationResult = thisObject
+                    val field = XposedHelpers.findFieldIfExists(locationResult.javaClass, "mLocations")
+                        ?: throw IllegalStateException("LocationResult.mLocations not found")
+                    field.isAccessible = true
+                    val locations = field.get(locationResult) as? List<*>
+                        ?: throw IllegalStateException("LocationResult.mLocations is not a List")
+                    require(locations.all { it is Location }) { "Invalid LocationResult batch" }
+                    field.set(locationResult, ArrayList(injectLocations(locations.filterIsInstance<Location>(), realLocation = false)))
+                }.onFailure { Logger.warn("Failed to transform LocationResult.writeToParcel", it) }
             }
         }.onFailure {
            Logger.error("Failed to hook LocationResult", it)
         }
 
         Location::class.java.hookAllMethodsBefore("set") {
-            if (!FakeLoc.enable) return@hookAllMethodsBefore
-            args[0] = injectLocation(args[0] as Location)
+            if (!FakeLoc.enable || transformingSet.get() == true) return@hookAllMethodsBefore
+            val location = args.firstOrNull() as? Location ?: return@hookAllMethodsBefore
+            transformingSet.set(true)
+            try {
+                runCatching { args[0] = injectLocation(location) }
+                    .onFailure { Logger.warn("Failed to transform Location.set", it) }
+            } finally {
+                transformingSet.remove()
+            }
         }
 //        if (FakeLocationConfig.DEBUG) {
 //            // Track the invocation of AutoNavi map system services

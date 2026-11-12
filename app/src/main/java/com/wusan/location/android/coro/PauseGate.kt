@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.update
 open class PauseGate(
     private val onResume: () -> Unit = {},
     private val onPause: () -> Unit = {},
+    private val canResume: () -> Boolean = { true },
 ) {
     private data class State(val paused: Boolean = true, val revision: Long = 0)
     private val state = MutableStateFlow(State())
@@ -27,6 +28,7 @@ open class PauseGate(
     }
 
     fun resume() {
+        if (!canResume()) return
         onResume()
         state.update { if (!it.paused) it else State(false, it.revision + 1) }
     }

@@ -2,10 +2,8 @@ package com.wusan.location
 
 import android.app.Application
 import android.content.Context
-import com.baidu.location.LocationClient
-import com.baidu.mapapi.CoordType
-import com.baidu.mapapi.SDKInitializer
 import com.tencent.bugly.crashreport.CrashReport
+import com.tencent.tencentmap.mapsdk.maps.TencentMapInitializer
 import com.wusan.location.android.Bugly
 import com.wusan.location.ui.settings.AppearanceSettings
 
@@ -15,12 +13,8 @@ class Portal: Application() {
         super.onCreate()
         AppearanceSettings.apply(this)
 
-        SDKInitializer.setAgreePrivacy(this, true)
-        LocationClient.setAgreePrivacy(true)
-
-        SDKInitializer.initialize(this)
-        SDKInitializer.setCoordType(DEFAULT_COORD_TYPE)
-
+        // 腾讯地图隐私合规：必须在任何地图组件初始化之前调用
+        TencentMapInitializer.setAgreePrivacy(true)
         CrashReport.initCrashReport(applicationContext)
 
         CrashReport.setUserId(applicationContext, Bugly.getUniqueDeviceId(applicationContext))
@@ -34,11 +28,7 @@ class Portal: Application() {
     }
 
     companion object {
-        val DEFAULT_COORD_TYPE = CoordType.GCJ02
-        const val DEFAULT_COORD_STR = "GCJ02"
 
         lateinit var appContext: Context
-        //val DEFAULT_COORD_TYPE = CoordType.BD09LL
-        //const val DEFAULT_COORD_STR = "bd09ll"
     }
 }
