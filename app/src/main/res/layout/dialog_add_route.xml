@@ -54,9 +54,13 @@
                 android:id="@+id/etRouteSet"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:imeOptions="actionNext"
-                android:inputType="text"
-                android:singleLine="true"
+                android:imeOptions="actionDone|flagNoExtractUi"
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:singleLine="false"
+                android:minLines="3"
+                android:maxLines="6"
+                android:gravity="top|start"
+                android:scrollbars="vertical"
                 android:textColor="@color/portal_text_color"
                 android:textAppearance="@style/TextAppearance.MaterialComponents.Body2">
             </com.google.android.material.textfield.TextInputEditText>

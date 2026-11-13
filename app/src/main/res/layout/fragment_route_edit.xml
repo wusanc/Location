@@ -5,7 +5,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".ui.home.HomeFragment">
+    tools:context=".ui.mock.RouteEditFragment">
 
     <com.tencent.tencentmap.mapsdk.maps.MapView
         android:id="@+id/bmapView"
@@ -13,6 +13,29 @@
         android:layout_height="match_parent"
         android:clickable="true"
         android:focusable="true" />
+
+    <!-- A non-interactive reticle stays at the exact map center. -->
+    <ImageView
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="center"
+        android:importantForAccessibility="no"
+        android:clickable="false"
+        android:focusable="false"
+        app:srcCompat="@drawable/route_center_target" />
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/btn_add_point"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical|end"
+        android:layout_marginEnd="16dp"
+        android:contentDescription="@string/route_edit_add_point"
+        android:tooltipText="@string/route_edit_add_point"
+        app:fabCustomSize="48dp"
+        app:backgroundTint="@color/wechat_action"
+        app:tint="@color/wechat_on_action"
+        app:srcCompat="@drawable/route_add_point_24" />
 
     <RadioGroup
         android:id="@+id/map_type_group"
@@ -62,7 +85,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/fab_margin"
-                android:contentDescription="@string/goto_location"
+                android:contentDescription="@string/route_edit_reset"
                 android:visibility="visible"
                 app:srcCompat="@drawable/baseline_add_location_24"
                 app:fabSize="mini"/>
@@ -72,7 +95,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/fab_margin"
-                android:contentDescription="@string/follow_location"
+                android:contentDescription="@string/route_edit_undo"
                 android:visibility="visible"
                 app:srcCompat="@drawable/baseline_rollback_24"
                 app:fabSize="mini"/>
@@ -82,7 +105,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/fab_margin"
-                android:contentDescription="@string/goto_location"
+                android:contentDescription="@string/route_edit_save"
                 android:visibility="visible"
                 app:srcCompat="@drawable/baseline_complete_24"
                 app:fabSize="mini"/>
@@ -92,7 +115,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/fab_margin"
-                android:contentDescription="@string/follow_location"
+                android:contentDescription="@string/route_edit_my_location"
                 android:visibility="visible"
                 app:srcCompat="@drawable/baseline_my_location_24"
                 app:fabSize="mini"/>

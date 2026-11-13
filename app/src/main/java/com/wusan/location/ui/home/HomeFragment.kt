@@ -5,11 +5,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
-import android.content.Context
 import android.graphics.Color
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -29,6 +25,8 @@ import com.tencent.tencentmap.mapsdk.maps.TencentMap
 import com.tencent.tencentmap.mapsdk.maps.model.LatLng
 import com.tencent.tencentmap.mapsdk.maps.model.MarkerOptions
 import com.tencent.tencentmap.mapsdk.maps.model.PolylineOptions
+import com.tencent.tencentmap.mapsdk.maps.model.Polyline
+import com.wusan.location.tmap.MapLocationSource
 import kotlinx.coroutines.launch
 import com.wusan.location.MainActivity
 import com.wusan.location.R
@@ -38,11 +36,9 @@ import com.wusan.location.ext.mapType
 import com.wusan.location.ext.rawHistoricalLocations
 import com.wusan.location.ext.selectRoute
 import com.wusan.location.ext.wgs84
-import com.wusan.location.tmap.TencentGeo
 import com.wusan.location.ui.viewmodel.HomeViewModel
 import com.wusan.location.ui.viewmodel.MapViewModel
 import java.math.BigDecimal
-import java.util.List
 
 class HomeFragment : Fragment() {
     private var _binding: FragmentHomeBinding? = null
@@ -52,8 +48,9 @@ class HomeFragment : Fragment() {
     private val homeViewModel by viewModels<HomeViewModel>()
     private val mapViewModel by activityViewModels<MapViewModel>()
 
-    private var locationManager: LocationManager? = null
-    private val locationListener = LocationListener { loc -> onLocationChanged(loc) }
+    private var locationSource: MapLocationSource? = null
+    private var routeLine: Polyline? = null
+    private var centered = false
 
     @SuppressLint("SetTextI18n")
     override fun onCreateView(
@@ -66,10 +63,8 @@ class HomeFragment : Fragment() {
 
         homeViewModel.mFabOpened = false
 
-        with(mapViewModel) {
-            isExists = true
-            tencentMap = binding.bmapView.map
-        }
+        centered = mapViewModel.markedLoc != null
+        mapViewModel.attach(binding.bmapView.map)
 
         with(binding.bmapView.map) {
             moveCamera(CameraUpdateFactory.zoomTo(19f))
@@ -82,7 +77,7 @@ class HomeFragment : Fragment() {
             setOnMapClickListener(object : TencentMap.OnMapClickListener {
                 override fun onMapClick(loc: LatLng?) {
                     if (loc == null) return
-                    mapViewModel.markedLoc = loc.wgs84
+                    mapViewModel.select(loc.wgs84)
                     mapViewModel.showDetailView = false
                     markMap()
                     reverseGeoCode(loc)
@@ -91,7 +86,7 @@ class HomeFragment : Fragment() {
 
             setOnMapLongClickListener { loc ->
                 if (loc == null) return@setOnMapLongClickListener
-                mapViewModel.markedLoc = loc.wgs84
+                mapViewModel.select(loc.wgs84)
                 mapViewModel.showDetailView = true
                 markMap()
                 reverseGeoCode(loc)
@@ -105,7 +100,22 @@ class HomeFragment : Fragment() {
             )
         }
 
-        startLocation()
+        val map = binding.bmapView.map
+        locationSource = MapLocationSource(requireContext()) { point ->
+            if (_binding != null) {
+                mapViewModel.currentLocation = point
+                if (!centered && mapViewModel.markedLoc == null) {
+                    centered = true
+                    map.moveCamera(CameraUpdateFactory.newLatLng(point.gcj02))
+                }
+            }
+        }
+        map.setLocationSource(locationSource)
+        map.isMyLocationEnabled = true
+        mapViewModel.markedLoc?.let {
+            map.moveCamera(CameraUpdateFactory.newLatLng(it.gcj02))
+            mapViewModel.drawMarker()
+        }
 
         binding.mapTypeGroup.setOnCheckedChangeListener { _, checkedId ->
             when (checkedId) {
@@ -202,6 +212,7 @@ class HomeFragment : Fragment() {
             if (loc == null) {
                 Toast.makeText(requireContext(), "尚未获取到定位", Toast.LENGTH_SHORT).show()
             } else {
+                centered = true
                 binding.bmapView.map.animateCamera(CameraUpdateFactory.newLatLng(loc.gcj02))
             }
         }
@@ -218,12 +229,13 @@ class HomeFragment : Fragment() {
 
         binding.showRoute.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
-                requireContext().selectRoute?.route?.let {
+                requireContext().selectRoute?.route?.takeIf { it.isNotEmpty() }?.let {
                     previewRoute(it)
                     binding.bmapView.map.moveCamera(CameraUpdateFactory.newLatLng(it.first().gcj02))
                 }
             } else {
-                binding.bmapView.map.clearAllOverlays()
+                routeLine?.remove()
+                routeLine = null
             }
         }
 
@@ -231,61 +243,14 @@ class HomeFragment : Fragment() {
     }
 
     private fun reverseGeoCode(loc: LatLng) {
-        lifecycleScope.launch {
-            TencentGeo.reverseGeoCode(requireContext(), loc) { address ->
-                mapViewModel.markName = address
-            }
-        }
-    }
-
-    private fun onLocationChanged(loc: Location) {
-        val wgs = loc.latitude to loc.longitude
-        mapViewModel.currentLocation = wgs
-
-        if (mapViewModel.followLocation && _binding != null) {
-            binding.bmapView.map.animateCamera(CameraUpdateFactory.newLatLng(wgs.gcj02))
-        }
-    }
-
-    private fun startLocation() {
-        val manager = requireContext()
-            .getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
-        locationManager = manager
-        runCatching {
-            manager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                1000L,
-                0f,
-                locationListener
-            )
-            manager.requestLocationUpdates(
-                LocationManager.NETWORK_PROVIDER,
-                1000L,
-                0f,
-                locationListener
-            )
-        }.onFailure {
-            Log.w("HomeFragment", "requestLocationUpdates failed", it)
-        }
+        mapViewModel.resolveAddress(requireContext())
     }
 
     private fun previewRoute(points: kotlin.collections.List<Pair<Double, Double>>) {
-        val map = binding.bmapView.map
-        map.clearAllOverlays()
-
-        for (i in 0 until points.size - 1) {
-            map.addPolyline(
-                PolylineOptions()
-                    .color(Color.argb(178, 0, 78, 255))
-                    .width(10f)
-                    .add(points[i].gcj02, points[i + 1].gcj02)
-            )
-        }
-    }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        binding.bmapView.onStart()
+        routeLine?.remove()
+        routeLine = null
+        if (points.size >= 2) routeLine = binding.bmapView.map.addPolyline(PolylineOptions()
+            .color(Color.argb(178, 0, 78, 255)).width(10f).addAll(points.map { it.gcj02 }))
     }
 
     @SuppressLint("SetTextI18n", "MissingInflatedId", "MutatingSharedPrefs")
@@ -330,11 +295,8 @@ class HomeFragment : Fragment() {
             if (markedLoc == null) {
                 currentLocation?.let {
                     showDetailView = false
-                    TencentGeo.reverseGeoCode(
-                        requireContext(),
-                        it.gcj02
-                    ) { address -> markName = address }
-                    markedLoc = it
+                    select(it)
+                    resolveAddress(requireContext())
                 }
                 editName.setText("当前位置-" + System.currentTimeMillis())
             } else {
@@ -354,6 +316,10 @@ class HomeFragment : Fragment() {
                 .setView(dialogView)
                 .setPositiveButton("保存") { _, _ ->
                     val latLonArray = editLatLon.text.toString().split(",")
+                    if (latLonArray.size != 2) {
+                        editLatLon.error = "请输入 经度,纬度"
+                        return@setPositiveButton
+                    }
                     val newLon = latLonArray[0].trim().toDoubleOrNull()
                     val newLat = latLonArray[1].trim().toDoubleOrNull()
                     var name = editName.text?.toString()
@@ -457,16 +423,13 @@ class HomeFragment : Fragment() {
                             throw IllegalArgumentException("Invalid latitude or longitude")
                         }
 
-                        this.markedLoc = lat to lon
+                        select(lat to lon)
 
                         markMap(true)
 
                         followLocation = false
 
-                        TencentGeo.reverseGeoCode(
-                            requireContext(),
-                            (lat to lon).gcj02
-                        ) { address -> markName = address }
+                        resolveAddress(requireContext())
                     } else {
                         Toast.makeText(requireContext(), "请输入有效的经纬度！", Toast.LENGTH_SHORT)
                             .show()
@@ -480,52 +443,36 @@ class HomeFragment : Fragment() {
             .show()
     }
 
-    private fun markMap(moveEyes: Boolean = false) = with(mapViewModel) {
-        val loc = markedLoc!!.gcj02
-        val map = binding.bmapView.map
-        map.clearAllOverlays()
-        map.addMarker(
-            MarkerOptions()
-                .position(loc)
-                .apply { mMapIndicator?.let { icon(it) } }
-        )
-
-        if (moveEyes) {
-            map.moveCamera(CameraUpdateFactory.newLatLng(loc))
+    private fun markMap(moveEyes: Boolean = false) {
+        mapViewModel.drawMarker()
+        centered = true
+        if (moveEyes) mapViewModel.markedLoc?.let {
+            _binding?.bmapView?.map?.moveCamera(CameraUpdateFactory.newLatLng(it.gcj02))
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-
-        if (_binding != null)
-            binding.bmapView.onResume()
+    override fun onStart() {
+        super.onStart()
+        _binding?.bmapView?.onStart()
+        locationSource?.start()
     }
-
-    override fun onDestroy() {
-        super.onDestroy()
-
-        mapViewModel.isExists = false
-        runCatching { locationManager?.removeUpdates(locationListener) }
-    }
-
-    override fun onPause() {
-        super.onPause()
-
-        if (_binding != null) {
-            binding.bmapView.onPause()
-        }
-    }
-
+    override fun onResume() { super.onResume(); _binding?.bmapView?.onResume() }
+    override fun onPause() { _binding?.bmapView?.onPause(); super.onPause() }
     override fun onStop() {
+        locationSource?.stop()
+        _binding?.bmapView?.onStop()
         super.onStop()
-        if (_binding != null) {
-            binding.bmapView.onStop()
-        }
     }
-
     override fun onDestroyView() {
-        super.onDestroyView()
+        locationSource?.close()
+        locationSource = null
+        _binding?.bmapView?.let { view ->
+            view.map.isMyLocationEnabled = false
+            mapViewModel.detach(view.map)
+            view.onDestroy()
+        }
+        routeLine = null
         _binding = null
+        super.onDestroyView()
     }
 }

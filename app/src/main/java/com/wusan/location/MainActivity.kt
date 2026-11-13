@@ -54,8 +54,9 @@ import androidx.navigation.ui.setupWithNavController
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.tencent.bugly.crashreport.CrashReport
 import com.tencent.tencentmap.mapsdk.maps.CameraUpdateFactory
-import com.tencent.tencentmap.mapsdk.maps.model.MarkerOptions
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import com.wusan.location.android.permission.RequestPermissions
 import com.wusan.location.android.root.ShellUtils
 import com.wusan.location.android.window.OverlayUtils
@@ -76,6 +77,10 @@ class MainActivity : AppCompatActivity() {
     private val requestMultiplePermissions = RequestPermissions(this)
 
     /* Map */
+    private var searchVersion = 0L
+    private var searchJob: Job? = null
+    private var mapSearchView: SearchView? = null
+    private var activeKeyword = ""
     private val mapViewModel by viewModels<MapViewModel>()
     private val mockServiceViewModel by viewModels<MockServiceViewModel>()
 
@@ -194,7 +199,7 @@ class MainActivity : AppCompatActivity() {
                             supportActionBar?.setHomeAsUpIndicator(R.drawable.baseline_arrow_back_24)
                         }
 
-                        binding.searchLinear.visibility = View.GONE
+                        invalidateSearch()
                         binding.appBarMain.toolbar.menu
                             .findItem(R.id.action_search)?.isVisible = destination.id == R.id.nav_home
                     }
@@ -293,7 +298,16 @@ class MainActivity : AppCompatActivity() {
         menuInflater.inflate(R.menu.main, menu)
         val searchItem: MenuItem = menu.findItem(R.id.action_search)
         val searchView = searchItem.actionView as SearchView
+        mapSearchView = searchView
         searchView.onActionViewExpanded()
+        searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
+            override fun onMenuItemActionExpand(item: MenuItem) = true
+            override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
+                invalidateSearch()
+                return true
+            }
+        })
+        searchView.setOnCloseListener { invalidateSearch(); false }
 
         val searchClose = searchView.findViewById<ImageView>(androidx.appcompat.R.id.search_close_btn)
         val searchBack = searchView.findViewById<ImageView>(androidx.appcompat.R.id.search_go_btn)
@@ -305,32 +319,26 @@ class MainActivity : AppCompatActivity() {
 
         val mSearchList = binding.searchListView
         mSearchList.onItemClickListener = OnItemClickListener { _, view, _, _ ->
-            val lngText = (view.findViewById<View>(R.id.poi_longitude) as TextView).text.toString()
-            val latText = (view.findViewById<View>(R.id.poi_latitude) as TextView).text.toString()
-            with(mapViewModel) {
-                markName = (view.findViewById<View>(R.id.poi_name) as TextView).text.toString()
-
-                val lng = lngText.toDouble() // wgs84
-                val lat = latText.toDouble()
-                markedLoc = lat to lng
-                if (isExists) {
-                    tencentMap.moveCamera(CameraUpdateFactory.newLatLng(markedLoc!!.gcj02))
-                } else {
-                    Toast.makeText(this@MainActivity, "地图未加载", Toast.LENGTH_SHORT).show()
-                }
-
-                markMap()
-
-                binding.searchLinear.visibility = View.INVISIBLE
-                searchItem.collapseActionView()
-            }
+            val map = mapViewModel.tencentMap ?: return@OnItemClickListener
+            if (findNavController(R.id.nav_host_fragment_content_main).currentDestination?.id != R.id.nav_home)
+                return@OnItemClickListener
+            val lng = (view.findViewById<View>(R.id.poi_longitude) as TextView).text.toString().toDoubleOrNull()
+            val lat = (view.findViewById<View>(R.id.poi_latitude) as TextView).text.toString().toDoubleOrNull()
+            if (lat == null || lng == null || lat !in -90.0..90.0 || lng !in -180.0..180.0)
+                return@OnItemClickListener
+            val name = (view.findViewById<View>(R.id.poi_name) as TextView).text.toString()
+            mapViewModel.select(lat to lng, name)
+            mapViewModel.showDetailView = false
+            map.moveCamera(CameraUpdateFactory.newLatLng((lat to lng).gcj02))
+            mapViewModel.drawMarker()
+            invalidateSearch()
+            searchItem.collapseActionView()
         }
 
         searchView.setOnQueryTextListener(object: SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String?): Boolean {
                 if (query.isNullOrBlank()) return false
-                searchPoi(query)
-                binding.searchLinear.visibility = View.INVISIBLE
+                searchPoi(query, immediate = true)
                 return true
             }
 
@@ -338,7 +346,7 @@ class MainActivity : AppCompatActivity() {
                 if (!newText.isNullOrBlank()) {
                     searchPoi(newText)
                 } else {
-                    binding.searchLinear.visibility = View.GONE
+                    invalidateSearch()
                 }
                 return true
             }
@@ -346,53 +354,52 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    private fun searchPoi(keyword: String) {
-        TencentGeo.suggest(this, keyword, mCityString) { pois ->
-            runOnUiThread {
-                if (pois.isEmpty()) {
-                    Toast.makeText(this, "未搜索到相关位置", Toast.LENGTH_SHORT).show()
-                    return@runOnUiThread
-                }
-                val data = pois.map { it.toMap() }
-                val simAdapt = SimpleAdapter(
-                    this, data,
-                    R.layout.layout_search_poi_item,
-                    arrayOf(
-                        Poi.KEY_NAME,
-                        Poi.KEY_ADDRESS,
-                        Poi.KEY_LONGITUDE_RAW,
-                        Poi.KEY_LATITUDE_RAW,
-                        Poi.KEY_TAG
-                    ),
-                    intArrayOf(
-                        R.id.poi_name,
-                        R.id.poi_address,
-                        R.id.poi_longitude,
-                        R.id.poi_latitude,
-                        R.id.poi_tag
-                    )
-                )
-                binding.searchListView.adapter = simAdapt
-                binding.searchLinear.visibility = View.VISIBLE
-            }
+    private fun invalidateSearch() {
+        searchVersion++
+        searchJob?.cancel()
+        searchJob = null
+        activeKeyword = ""
+        if (::binding.isInitialized) {
+            binding.searchLinear.visibility = View.GONE
+            binding.searchListView.adapter = null
         }
     }
 
-    private fun markMap() {
-        with(mapViewModel) {
-            if (markedLoc == null) return
+    private fun canShowSearch(version: Long, keyword: String, mapGeneration: Long): Boolean =
+        !isFinishing && !isDestroyed && ::binding.isInitialized &&
+            lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+            version == searchVersion && keyword == activeKeyword &&
+            mapViewModel.isExists && mapGeneration == mapViewModel.viewGeneration &&
+            mapSearchView?.query?.toString()?.trim() == keyword &&
+            findNavController(R.id.nav_host_fragment_content_main).currentDestination?.id == R.id.nav_home
 
-            followLocation = false
-
-            val gcjLoc = markedLoc!!.gcj02
-            tencentMap.clearAllOverlays()
-            tencentMap.addMarker(
-                MarkerOptions()
-                    .position(gcjLoc)
-                    .apply {
-                        mMapIndicator?.let { icon(it) }
+    private fun searchPoi(input: String, immediate: Boolean = false) {
+        val keyword = input.trim()
+        invalidateSearch()
+        if (keyword.isEmpty()) return
+        activeKeyword = keyword
+        val version = searchVersion
+        val mapGeneration = mapViewModel.viewGeneration
+        searchJob = lifecycleScope.launch {
+            if (!immediate) delay(300L)
+            if (!canShowSearch(version, keyword, mapGeneration)) return@launch
+            TencentGeo.suggest(applicationContext, keyword, mCityString) { pois ->
+                runOnUiThread {
+                    if (!canShowSearch(version, keyword, mapGeneration)) return@runOnUiThread
+                    if (pois.isEmpty()) {
+                        binding.searchLinear.visibility = View.GONE
+                        binding.searchListView.adapter = null
+                        if (immediate) Toast.makeText(this@MainActivity, "未搜索到相关位置", Toast.LENGTH_SHORT).show()
+                        return@runOnUiThread
                     }
-            )
+                    binding.searchListView.adapter = SimpleAdapter(
+                        this@MainActivity, pois.map { it.toMap() }, R.layout.layout_search_poi_item,
+                        arrayOf(Poi.KEY_NAME, Poi.KEY_ADDRESS, Poi.KEY_LONGITUDE_RAW, Poi.KEY_LATITUDE_RAW, Poi.KEY_TAG),
+                        intArrayOf(R.id.poi_name, R.id.poi_address, R.id.poi_longitude, R.id.poi_latitude, R.id.poi_tag)
+                    )
+                    binding.searchLinear.visibility = View.VISIBLE
+                }
+            }
         }
     }
 
@@ -401,7 +408,15 @@ class MainActivity : AppCompatActivity() {
         return navController.navigateUp(appBarConfiguration) || super.onSupportNavigateUp()
     }
 
+    override fun onStop() {
+        invalidateSearch()
+        super.onStop()
+    }
+
     override fun onDestroy() {
+        searchVersion++
+        searchJob?.cancel()
+        mapSearchView = null
         super.onDestroy()
     }
 

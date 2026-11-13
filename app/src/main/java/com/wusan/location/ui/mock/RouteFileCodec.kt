@@ -19,9 +19,10 @@ object RouteFileCodec {
         val routes: List<HistoricalRoute>, val added: Int, val duplicates: Int, val renamed: Int
     )
 
-    private const val MAX_BYTES = 10 * 1024 * 1024
-    private const val MAX_ROUTES = 1000
-    private const val MAX_POINTS = 100_000
+    internal const val MAX_FILE_MB = 20
+    internal const val MAX_BYTES = MAX_FILE_MB * 1024 * 1024
+    internal const val MAX_ROUTES = 2000
+    internal const val MAX_POINTS = 200_000
     private const val MAX_NAME = 120
 
     fun decode(input: InputStream): List<HistoricalRoute> {
@@ -30,7 +31,7 @@ object RouteFileCodec {
         while (true) {
             val count = input.read(buffer)
             if (count < 0) break
-            require(output.size() + count <= MAX_BYTES) { "路线文件不能超过 10 MB" }
+            require(output.size() + count <= MAX_BYTES) { "路线文件不能超过 $MAX_FILE_MB MB" }
             output.write(buffer, 0, count)
         }
         val bytes = output.toByteArray()
@@ -82,7 +83,7 @@ object RouteFileCodec {
                 append("</gpx>\n")
             }
         }
-        require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "导出内容超过 10 MB，请分条导出" }
+        require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "导出内容超过 $MAX_FILE_MB MB，请分条导出" }
         return text
     }
 
@@ -111,7 +112,7 @@ object RouteFileCodec {
             }
         }
         require(result.size <= MAX_ROUTES && result.sumOf { it.route.size.toLong() } <= MAX_POINTS) {
-            "合并后超过上限：最多 1000 条路线、共 100000 个坐标点"
+            "合并后超过上限：最多 $MAX_ROUTES 条路线、共 $MAX_POINTS 个坐标点"
         }
         return MergeResult(result, result.size - existing.size, duplicates, renamed)
     }
@@ -119,7 +120,7 @@ object RouteFileCodec {
     private fun validate(routes: List<HistoricalRoute>): List<HistoricalRoute> {
         require(routes.isNotEmpty()) { "文件中没有路线" }
         require(routes.size <= MAX_ROUTES && routes.sumOf { it.route.size.toLong() } <= MAX_POINTS) {
-            "最多支持 1000 条路线、共 100000 个坐标点"
+            "最多支持 $MAX_ROUTES 条路线、共 $MAX_POINTS 个坐标点"
         }
         return routes.map { route ->
             val name = route.name.trim()
@@ -152,7 +153,7 @@ object RouteFileCodec {
             } else listOf(root)
             else -> throw IllegalArgumentException("JSON 内容必须是路线对象或数组")
         }
-        require(items.size <= MAX_ROUTES) { "最多支持 1000 条路线" }
+        require(items.size <= MAX_ROUTES) { "最多支持 $MAX_ROUTES 条路线" }
         var pointCount = 0
         return items.map { item ->
             val obj = item as? Map<*, *> ?: throw IllegalArgumentException("路线必须是 JSON 对象")
@@ -161,7 +162,7 @@ object RouteFileCodec {
             val points = obj[if (modern) "points" else "route"] as? List<*>
                 ?: throw IllegalArgumentException("路线缺少坐标数组")
             pointCount += points.size
-            require(pointCount <= MAX_POINTS) { "最多支持 100000 个坐标点" }
+            require(pointCount <= MAX_POINTS) { "最多支持 $MAX_POINTS 个坐标点" }
             HistoricalRoute(name, points.map { point ->
                 val p = point as? Map<*, *> ?: throw IllegalArgumentException("坐标点必须是 JSON 对象")
                 fun number(key: String): Double = (p[key] as? Number)?.toDouble()
@@ -217,7 +218,7 @@ object RouteFileCodec {
             // rte starts both the route container and its point list.
             if (path.joinToString("/") == "gpx/rte") points = mutableListOf()
             if (path.joinToString("/") in setOf("gpx/trk/trkseg/trkpt", "gpx/rte/rtept")) {
-                require(++totalPoints <= MAX_POINTS) { "最多支持 100000 个坐标点" }
+                require(++totalPoints <= MAX_POINTS) { "最多支持 $MAX_POINTS 个坐标点" }
                 val lat = attributes.getValue("lat")?.toDoubleOrNull()
                 val lon = attributes.getValue("lon")?.toDoubleOrNull()
                 require(lat != null && lon != null) { "GPX 坐标点缺少有效的 lat 或 lon" }
@@ -248,7 +249,7 @@ object RouteFileCodec {
                 val base = name.ifBlank { "导入路线 ${routes.size + 1}" }
                 val suffix = if (segments.size > 1) " (分段 ${index + 1})" else ""
                 routes.add(HistoricalRoute(base.take(MAX_NAME - suffix.length) + suffix, segment))
-                require(routes.size <= MAX_ROUTES) { "最多支持 1000 条路线" }
+                require(routes.size <= MAX_ROUTES) { "最多支持 $MAX_ROUTES 条路线" }
             }
             segments.clear()
             points = null

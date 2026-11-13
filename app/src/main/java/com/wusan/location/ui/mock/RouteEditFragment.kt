@@ -1,467 +1,348 @@
 package com.wusan.location.ui.mock
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
-import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
-import android.annotation.SuppressLint
-import android.content.Context
 import android.graphics.Color
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.os.Bundle
-import android.util.Log
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.alibaba.fastjson2.JSON
-import com.alibaba.fastjson2.JSONArray
-import com.alibaba.fastjson2.JSONObject
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.tencent.tencentmap.mapsdk.maps.CameraUpdateFactory
 import com.tencent.tencentmap.mapsdk.maps.TencentMap
-import com.tencent.tencentmap.mapsdk.maps.model.LatLng
+import com.tencent.tencentmap.mapsdk.maps.model.CameraPosition
+import com.tencent.tencentmap.mapsdk.maps.model.MyLocationStyle
+import com.tencent.tencentmap.mapsdk.maps.model.TencentMapGestureListener
+import com.tencent.tencentmap.mapsdk.maps.model.Polyline
+import com.tencent.tencentmap.mapsdk.maps.model.Marker
 import com.tencent.tencentmap.mapsdk.maps.model.MarkerOptions
 import com.tencent.tencentmap.mapsdk.maps.model.PolylineOptions
-import kotlinx.coroutines.launch
-import com.wusan.location.MainActivity
 import com.wusan.location.R
 import com.wusan.location.databinding.FragmentRouteEditBinding
 import com.wusan.location.ext.gcj02
-import com.wusan.location.ext.jsonHistoricalRoutes
 import com.wusan.location.ext.mapType
 import com.wusan.location.ext.wgs84
-import com.wusan.location.tmap.TencentGeo
-import com.wusan.location.ui.viewmodel.HomeViewModel
+import com.wusan.location.tmap.MapLocationSource
 import com.wusan.location.ui.viewmodel.MapViewModel
-import java.math.BigDecimal
-
+import com.wusan.location.ui.viewmodel.RouteDraftViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class RouteEditFragment : Fragment() {
     private var _binding: FragmentRouteEditBinding? = null
     private val binding get() = _binding!!
-
-    private val routeEditViewModel by viewModels<HomeViewModel>()
     private val mapViewModel by activityViewModels<MapViewModel>()
+    private val draft by viewModels<RouteDraftViewModel>()
+    private var locationSource: MapLocationSource? = null
+    private var gestureListener: TencentMapGestureListener? = null
+    private var routeLine: Polyline? = null
+    private var previewLine: Polyline? = null
+    private var startMarker: Marker? = null
+    private var endMarker: Marker? = null
+    private var editorDialog: AlertDialog? = null
+    private var centered = false
+    private var menuOpen = true
 
-    private var mPoints: ArrayList<Pair<Double, Double>> = arrayListOf()
-    private var isDrawing = false
-    private var lastPoint: Pair<Double, Double>? = null
-
-    private var locationManager: LocationManager? = null
-    private val locationListener = LocationListener { loc -> onLocationChanged(loc) }
-
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentRouteEditBinding.inflate(inflater, container, false)
-
-        with(mapViewModel) {
-            isExists = true
-            tencentMap = binding.bmapView.map
+        val map = binding.bmapView.map
+        centered = draft.cameraPosition != null || draft.points.isNotEmpty() ||
+            mapViewModel.markedLoc != null || mapViewModel.currentLocation != null
+        mapViewModel.attach(map)
+        map.moveCamera(CameraUpdateFactory.zoomTo(19f))
+        map.setMapType(requireContext().mapType)
+        map.uiSettings.isCompassEnabled = true
+        map.uiSettings.isZoomControlsEnabled = true
+        map.uiSettings.isScaleViewEnabled = true
+        // Location updates may move the blue dot, but must never take over the camera.
+        map.setMyLocationStyle(MyLocationStyle()
+            .myLocationType(MyLocationStyle.LOCATION_TYPE_LOCATION_ROTATE_NO_CENTER))
+        // Consume endpoint taps so the SDK does not pan back to the route start marker.
+        map.setOnMarkerClickListener { marker ->
+            marker?.showInfoWindow()
+            true
         }
-
-        with(binding.bmapView.map) {
-            moveCamera(CameraUpdateFactory.zoomTo(19f))
-            setMapType(context?.mapType ?: TencentMap.MAP_TYPE_NORMAL)
-
-            uiSettings.isCompassEnabled = true
-            uiSettings.isZoomControlsEnabled = true
-            uiSettings.isScaleViewEnabled = true
-
-            setOnMapClickListener(object : TencentMap.OnMapClickListener {
-                override fun onMapClick(loc: LatLng?) {
-                    if (loc == null) return
-                    mapViewModel.markedLoc = loc.wgs84
-                    mapViewModel.showDetailView = false
-                    reverseGeoCode(loc)
-                    markMap()
-                }
-            })
-
-            setOnMapLongClickListener { loc ->
-                if (loc == null) return@setOnMapLongClickListener
-                mapViewModel.markedLoc = loc.wgs84
-                mapViewModel.showDetailView = true
-                reverseGeoCode(loc)
-                markMap()
+        gestureListener = object : TencentMapGestureListener {
+            override fun onDown(x: Float, y: Float): Boolean {
+                centered = true
+                map.stopAnimation()
+                return false // The SDK still handles the gesture normally.
             }
-
-            binding.mapTypeGroup.check(
-                when (mapType) {
-                    TencentMap.MAP_TYPE_SATELLITE -> R.id.map_type_satellite
-                    else -> R.id.map_type_normal
-                }
-            )
-        }
-
-        binding.fab.setOnClickListener { view ->
-            val subFabList = arrayOf(
-                binding.fabStart,
-                binding.fabRollback,
-                binding.fabComplete,
-                binding.fabMyLocation
-            )
-
-            routeEditViewModel.mFabOpened = !routeEditViewModel.mFabOpened
-
-            if (routeEditViewModel.mFabOpened) {
-                val rotateMainFab = ObjectAnimator.ofFloat(view, "rotation", 0f, 90f)
-                rotateMainFab.duration = 200
-
-                val animators = arrayListOf<ObjectAnimator>()
-                animators.add(rotateMainFab)
-                subFabList.forEachIndexed { index, fab ->
-                    fab.visibility = View.VISIBLE
-                    fab.alpha = 1f
-                    fab.scaleX = 1f
-                    fab.scaleY = 1f
-                    val translationX =
-                        ObjectAnimator.ofFloat(fab, "translationX", 0f, 20f + index * 8f)
-                    translationX.duration = 200
-                    animators.add(translationX)
-                }
-
-                val animatorSet = AnimatorSet()
-                animatorSet.playTogether(animators.toList())
-                animatorSet.interpolator = DecelerateInterpolator()
-                animatorSet.addListener(object : AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: Animator) {
-                        view.isClickable = true
-                    }
-                })
-                view.isClickable = false
-                animatorSet.start()
-            } else {
-                val rotateMainFab = ObjectAnimator.ofFloat(view, "rotation", 90f, 0f)
-                rotateMainFab.duration = 200
-
-                val animators = arrayListOf<ObjectAnimator>()
-                animators.add(rotateMainFab)
-                subFabList.forEachIndexed { index, fab ->
-                    val transX = ObjectAnimator.ofFloat(fab, "translationX", 0f, -20f - index * 8f)
-                    transX.duration = 150
-                    val scaleX = ObjectAnimator.ofFloat(fab, "scaleX", 1f, 0f)
-                    scaleX.duration = 200
-                    val scaleY = ObjectAnimator.ofFloat(fab, "scaleY", 1f, 0f)
-                    scaleY.duration = 200
-                    val alpha = ObjectAnimator.ofFloat(fab, "alpha", 1f, 0f)
-                    alpha.duration = 200
-                    animators.add(transX)
-                    animators.add(scaleX)
-                    animators.add(scaleY)
-                    animators.add(alpha)
-                }
-
-                val animatorSet = AnimatorSet()
-                animatorSet.playTogether(animators.toList())
-                animatorSet.interpolator = DecelerateInterpolator()
-                animatorSet.addListener(object : AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: Animator) {
-                        subFabList.forEach { it.visibility = View.GONE }
-                        view.isClickable = true
-                    }
-                })
-                view.isClickable = false
-                animatorSet.start()
-            }
-        }
-
-        startLocation()
-
-        binding.mapTypeGroup.setOnCheckedChangeListener { _, checkedId ->
-            when (checkedId) {
-                R.id.map_type_normal -> {
-                    binding.bmapView.map.setMapType(TencentMap.MAP_TYPE_NORMAL)
-                }
-
-                R.id.map_type_satellite -> {
-                    binding.bmapView.map.setMapType(TencentMap.MAP_TYPE_SATELLITE)
-                }
-
-                else -> {
-                    Log.e("RouteEditFragment", "Unknown location view mode: $checkedId")
+            override fun onDoubleTap(x: Float, y: Float) = false
+            override fun onSingleTap(x: Float, y: Float) = false
+            override fun onFling(x: Float, y: Float) = false
+            override fun onScroll(x: Float, y: Float) = false
+            override fun onLongPress(x: Float, y: Float) = false
+            override fun onUp(x: Float, y: Float) = false
+            override fun onTwoFingerMoveAgainst(
+                status: TencentMapGestureListener.TwoFingerMoveAgainstStatus,
+                position: CameraPosition
+            ) = false
+            override fun onMapStable() = Unit
+        }.also { map.addTencentMapGestureListener(it) }
+        // Moving the map only previews the next point. Only the add button commits it.
+        map.setOnCameraChangeListener(object : TencentMap.OnCameraChangeListener {
+            override fun onCameraChange(position: CameraPosition) {
+                if (_binding != null) {
+                    centered = true
+                    refreshCandidate()
                 }
             }
-            context?.mapType = binding.bmapView.map.mapType
-        }
+            override fun onCameraChangeFinished(position: CameraPosition) {
+                if (_binding != null) refreshCandidate()
+            }
+        })
+        val initial = draft.points.lastOrNull() ?: mapViewModel.markedLoc ?: mapViewModel.currentLocation
+        val restoredCamera = draft.cameraPosition
+        if (restoredCamera != null) {
+            map.moveCamera(CameraUpdateFactory.newCameraPosition(restoredCamera))
+        } else initial?.let { map.moveCamera(CameraUpdateFactory.newLatLng(it.gcj02)) }
+        refresh()
 
-        // 腾讯地图没有直接的原始触摸回调，这里挂在 MapView 上，返回 false 不影响地图自身手势
-        binding.bmapView.setOnTouchListener { _, event ->
-            if (isDrawing) {
-                val currentPoint = binding.bmapView.map.cameraPosition.target.wgs84
-
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        if (mPoints.size <= 0) {
-                            mPoints.add(currentPoint)
-                        }
-                        lastPoint = currentPoint
-                    }
-
-                    MotionEvent.ACTION_MOVE -> {
-                        if (lastPoint == null) {
-                            lastPoint = currentPoint
-                        }
-                        lastPoint?.let { lp -> drawLine(lp, currentPoint) }
-                    }
-
-                    MotionEvent.ACTION_UP -> {
-                        mPoints.add(currentPoint)
-                        lastPoint = null
-                    }
+        locationSource = MapLocationSource(requireContext()) { point ->
+            if (_binding != null) {
+                mapViewModel.currentLocation = point
+                if (!centered && !draft.drawing) {
+                    centered = true
+                    map.moveCamera(CameraUpdateFactory.newLatLng(point.gcj02))
                 }
             }
-            false
         }
-
+        map.setLocationSource(locationSource)
+        map.isMyLocationEnabled = true
+        binding.mapTypeGroup.check(if (map.mapType == TencentMap.MAP_TYPE_SATELLITE)
+            R.id.map_type_satellite else R.id.map_type_normal)
+        binding.mapTypeGroup.setOnCheckedChangeListener { _, id ->
+            val type = if (id == R.id.map_type_satellite) TencentMap.MAP_TYPE_SATELLITE else TencentMap.MAP_TYPE_NORMAL
+            map.setMapType(type)
+            requireContext().mapType = type
+        }
+        binding.fab.setOnClickListener {
+            menuOpen = !menuOpen
+            listOf(binding.fabStart, binding.fabRollback, binding.fabComplete, binding.fabMyLocation).forEach {
+                it.visibility = if (menuOpen) View.VISIBLE else View.GONE
+            }
+            binding.fab.rotation = if (menuOpen) 90f else 0f
+        }
+        menuOpen = true
         binding.fabStart.setOnClickListener {
-            isDrawing = true
-            mPoints = arrayListOf()
-            lastPoint = null
+            if (draft.points.isEmpty()) resetDraft()
+            else MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.route_edit_reset)
+                .setMessage(R.string.route_edit_reset_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.route_edit_reset) { _, _ -> resetDraft() }
+                .show()
         }
-
+        binding.btnAddPoint.setOnClickListener {
+            centered = true
+            appendPoint(map.cameraPosition.target.wgs84)
+        }
         binding.fabRollback.setOnClickListener {
-            if (mPoints.size > 0) {
-                mPoints.removeAt(mPoints.size - 1)
-                refresh()
-            }
+            draft.points.removeLastOrNull()
+            refresh()
         }
-
-        binding.fabComplete.setOnClickListener {
-            isDrawing = false
-            if (!showAddRouteDialog()) {
-                Toast.makeText(requireContext(), "选择路线异常", Toast.LENGTH_SHORT).show()
-            }
-        }
-
+        binding.fabComplete.setOnClickListener { showRouteDialog() }
         binding.fabMyLocation.setOnClickListener {
-            val loc = mapViewModel.currentLocation
-            if (loc == null) {
-                Toast.makeText(requireContext(), "尚未获取到定位", Toast.LENGTH_SHORT).show()
-            } else {
-                binding.bmapView.map.animateCamera(CameraUpdateFactory.newLatLng(loc.gcj02))
-            }
+            mapViewModel.currentLocation?.let {
+                centered = true
+                map.animateCamera(CameraUpdateFactory.newLatLng(it.gcj02))
+            } ?: toast("尚未获取到定位")
         }
-
+        refreshCandidate()
         return binding.root
     }
 
-    private fun reverseGeoCode(loc: LatLng) {
-        lifecycleScope.launch {
-            TencentGeo.reverseGeoCode(requireContext(), loc) { address ->
-                mapViewModel.markName = address
+    private fun resetDraft() {
+        draft.points.clear()
+        draft.drawing = false
+        centered = true
+        mapViewModel.clearMarker()
+        refresh()
+    }
+
+    private fun appendPoint(point: Pair<Double, Double>) {
+        if (!point.first.isFinite() || !point.second.isFinite() ||
+            point.first !in -90.0..90.0 || point.second !in -180.0..180.0) return
+        draft.points.lastOrNull()?.let { last ->
+            if (distance(last, point) < 0.05f) {
+                toast(getString(R.string.route_edit_duplicate))
+                return
             }
         }
-    }
-
-    private fun onLocationChanged(loc: Location) {
-        mapViewModel.currentLocation = loc.latitude to loc.longitude
-    }
-
-    private fun startLocation() {
-        val manager = requireContext()
-            .getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
-        locationManager = manager
-        runCatching {
-            manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener)
-            manager.requestLocationUpdates(
-                LocationManager.NETWORK_PROVIDER,
-                1000L,
-                0f,
-                locationListener
-            )
-        }.onFailure {
-            Log.w("RouteEditFragment", "requestLocationUpdates failed", it)
+        if (draft.points.size >= RouteFileCodec.MAX_POINTS) {
+            toast("路线已达到 ${RouteFileCodec.MAX_POINTS} 个点，请完成保存")
+            return
         }
+        draft.drawing = true
+        draft.points.add(point)
+        refresh()
+    }
+
+    private fun distance(a: Pair<Double, Double>, b: Pair<Double, Double>): Float {
+        val result = FloatArray(1)
+        Location.distanceBetween(a.first, a.second, b.first, b.second, result)
+        return result[0]
     }
 
     private fun refresh() {
-        val map = binding.bmapView.map
-        map.clearAllOverlays()
+        val map = _binding?.bmapView?.map ?: return
+        val points = draft.points.map { it.gcj02 }
+        if (points.size < 2) {
+            routeLine?.remove()
+            routeLine = null
+        } else if (routeLine == null) {
+            routeLine = map.addPolyline(PolylineOptions()
+                .color(Color.argb(220, 0, 78, 255)).width(10f).addAll(points))
+        } else routeLine?.points = points
 
-        for (i in 0 until mPoints.size - 1) {
-            map.addPolyline(
-                PolylineOptions()
-                    .color(Color.argb(178, 0, 78, 255))
-                    .width(10f)
-                    .add(mPoints[i].gcj02, mPoints[i + 1].gcj02)
-            )
+        if (points.isEmpty()) {
+            startMarker?.remove()
+            startMarker = null
+        } else if (startMarker == null) {
+            startMarker = map.addMarker(MarkerOptions().position(points.first())
+                .title(getString(R.string.route_edit_start_point)))
+        } else startMarker?.position = points.first()
+
+        if (points.size < 2) {
+            endMarker?.remove()
+            endMarker = null
+        } else if (endMarker == null) {
+            endMarker = map.addMarker(MarkerOptions().position(points.last())
+                .title(getString(R.string.route_edit_last_point)))
+        } else endMarker?.position = points.last()
+        refreshCandidate()
+    }
+
+    private fun refreshCandidate() {
+        val current = _binding ?: return
+        val map = current.bmapView.map
+        val candidate = map.cameraPosition.target.wgs84
+        val count = draft.points.size
+        current.btnAddPoint.isEnabled = count < RouteFileCodec.MAX_POINTS
+        current.fabRollback.isEnabled = count > 0
+        val last = draft.points.lastOrNull()
+        if (last == null || distance(last, candidate) < 0.05f) {
+            previewLine?.remove()
+            previewLine = null
+        } else {
+            val segment = listOf(last.gcj02, candidate.gcj02)
+            if (previewLine == null) previewLine = map.addPolyline(PolylineOptions()
+                .color(Color.argb(170, 255, 145, 0)).width(6f).addAll(segment))
+            else previewLine?.points = segment
         }
     }
 
-    private fun drawLine(start: Pair<Double, Double>, end: Pair<Double, Double>) {
-        val map = binding.bmapView.map
-        map.clearAllOverlays()
-
-        for (i in 0 until mPoints.size - 1) {
-            map.addPolyline(
-                PolylineOptions()
-                    .color(Color.argb(178, 0, 78, 255))
-                    .width(10f)
-                    .add(mPoints[i].gcj02, mPoints[i + 1].gcj02)
-            )
-        }
-
-        map.addPolyline(
-            PolylineOptions()
-                .color(Color.argb(178, 0, 78, 255))
-                .width(10f)
-                .add(start.gcj02, end.gcj02)
-        )
-    }
-
-
-    private fun markMap(moveEyes: Boolean = false) = with(mapViewModel) {
-        val loc = markedLoc!!.gcj02
-        val map = binding.bmapView.map
-        map.clearAllOverlays()
-        map.addMarker(
-            MarkerOptions()
-                .position(loc)
-                .apply { mMapIndicator?.let { icon(it) } }
-        )
-
-        if (moveEyes) {
-            map.moveCamera(CameraUpdateFactory.newLatLng(loc))
-        }
-    }
-
-    @SuppressLint("SetTextI18n", "MissingInflatedId", "MutatingSharedPrefs")
-    private fun showAddRouteDialog(): Boolean {
-        fun checkLatLon(lat: Double?, lon: Double?): Boolean {
-            return (lat != null && lon != null) && lat in -90.0..90.0 && lon in -180.0..180.0
-        }
-
-        val inflater = LayoutInflater.from(requireContext())
-        val dialogView = inflater.inflate(R.layout.dialog_add_route, null)
-        val editName = dialogView.findViewById<TextInputEditText>(R.id.etRouteName)
-        editName.addTextChangedListener {
-            if (it.isNullOrBlank()) {
-                editName.error = "名称不能为空"
-            }
-        }
-        val editRoute = dialogView.findViewById<TextInputEditText>(R.id.etRouteSet)
-        editRoute.addTextChangedListener {
-            if (it.isNullOrBlank()) {
-                editRoute.error = "路线经纬度不能为空"
-            } else {
-                try {
-                    val json = it.toString()
-                    val points = JSON.parseArray(json)
-                    if (points.size < 2) {
-                        editRoute.error = "路线经纬度至少需要两个点"
-                    }
-                    for (point in points) {
-                        val jsonObject = point as JSONObject
-                        val latitude = jsonObject.getDouble("first")
-                        val longitude = jsonObject.getDouble("second")
-                        if (!checkLatLon(latitude, longitude)) {
-                            editRoute.error = "路线经纬度格式错误"
-                            return@addTextChangedListener
+    private fun showRouteDialog() {
+        if (editorDialog?.isShowing == true) return
+        if (draft.points.size < 2) { toast(getString(R.string.route_edit_need_points)); return }
+        val view = layoutInflater.inflate(R.layout.dialog_add_route, null)
+        val nameInput = view.findViewById<TextInputEditText>(R.id.etRouteName)
+        val routeInput = view.findViewById<TextInputEditText>(R.id.etRouteSet)
+        routeInput.setText(JSON.toJSONString(draft.points))
+        nameInput.addTextChangedListener { nameInput.error = null }
+        routeInput.addTextChangedListener { routeInput.error = null }
+        val dialog = MaterialAlertDialogBuilder(requireContext()).setView(view)
+            .setPositiveButton("保存", null).setNegativeButton(android.R.string.cancel, null).create()
+        editorDialog = dialog
+        dialog.setOnDismissListener { if (editorDialog === dialog) editorDialog = null }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = nameInput.text?.toString()?.trim().orEmpty()
+                if (name.isBlank() || name.length > 120 || name.any { it.code < 32 }) {
+                    nameInput.error = "名称须为 1～120 个字符，不能包含控制字符"
+                    return@setOnClickListener
+                }
+                val text = routeInput.text?.toString().orEmpty()
+                val appContext = requireContext().applicationContext
+                viewLifecycleOwner.lifecycleScope.launch {
+                    val saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                    val cancelButton = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+                    saveButton.isEnabled = false
+                    cancelButton.isEnabled = false
+                    dialog.setCancelable(false)
+                    routeInput.isEnabled = false
+                    nameInput.isEnabled = false
+                    try {
+                        val (savedRoute, result) = withContext(Dispatchers.IO) {
+                            require(text.toByteArray(Charsets.UTF_8).size <= RouteFileCodec.MAX_BYTES) { "路线内容不能超过 ${RouteFileCodec.MAX_FILE_MB} MB" }
+                            val points = try { JSON.parseArray(text) }
+                                catch (e: Exception) { throw IllegalArgumentException("路线 JSON 格式错误，请检查后重试", e) }
+                            require(points != null && points.size >= 2) { "路线至少需要两个坐标点" }
+                            val raw = JSON.toJSONString(mapOf("name" to name, "route" to points))
+                            val route = RouteFileCodec.decode(raw.byteInputStream()).single()
+                            // Save the exact validated editor contents; use the same locked store as import.
+                            route to RouteStore.import(appContext, listOf(route))
+                        }
+                        draft.drawing = false
+                        draft.points.clear()
+                        draft.points.addAll(savedRoute.route)
+                        refresh()
+                        toast(if (result.added == 0) "相同路线已存在，未重复保存" else
+                            if (result.renamed > 0) "路线已保存，同名路线已自动重命名" else "路线已保存")
+                        dialog.dismiss()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        routeInput.error = e.message ?: "路线保存失败，请检查坐标和存储空间"
+                    } finally {
+                        if (dialog.isShowing) {
+                            saveButton.isEnabled = true
+                            cancelButton.isEnabled = true
+                            dialog.setCancelable(true)
+                            routeInput.isEnabled = true
+                            nameInput.isEnabled = true
                         }
                     }
-                } catch (e: Exception) {
-                    editRoute.error = "路线经纬度json格式错误"
                 }
             }
         }
-
-        editRoute.setText(JSON.toJSONString(mPoints))
-
-        val builder = MaterialAlertDialogBuilder(requireContext())
-        builder.setTitle(null)
-        builder
-            .setCancelable(false)
-            .setView(dialogView)
-            .setPositiveButton("保存") { _, _ ->
-                val routeJson = editRoute.text.toString()
-
-                var name = editName.text?.toString()
-                if (name.isNullOrBlank()) {
-                    Toast.makeText(requireContext(), "名称不能为空", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                val points = JSON.parseArray(routeJson)
-                if (points.size < 2) {
-                    Toast.makeText(requireContext(), "路线经纬度至少需要两个点", Toast.LENGTH_SHORT)
-                        .show()
-                    return@setPositiveButton
-                }
-
-                for (point in points) {
-                    val jsonObject = point as JSONObject
-                    val latitude = jsonObject.getDouble("first")
-                    val longitude = jsonObject.getDouble("second")
-                    if (!checkLatLon(latitude, longitude)) {
-                        Toast.makeText(requireContext(), "路线经纬度格式错误", Toast.LENGTH_SHORT)
-                            .show()
-                        return@setPositiveButton
-                    }
-                }
-
-                with(requireContext()) {
-                    val routes = jsonHistoricalRoutes
-                    val jsonArray: JSONArray = if (routes.isNotEmpty()) {
-                        JSON.parseArray(routes)
-                    } else {
-                        JSONArray()
-                    }
-                    val historicalRoute = HistoricalRoute(name, mPoints)
-                    jsonArray.add(historicalRoute)
-                    jsonArray.toJSONString().also {
-                        jsonHistoricalRoutes = it
-                    }
-                }
-
-                Toast.makeText(requireContext(), "路线已保存", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("取消", null)
-            .show()
-
-        return true
+        dialog.show()
     }
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        binding.bmapView.onStart()
+    override fun onStart() {
+        super.onStart()
+        _binding?.bmapView?.onStart()
+        locationSource?.start()
     }
-
-    override fun onResume() {
-        super.onResume()
-        if (_binding != null) binding.bmapView.onResume()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        if (_binding != null) binding.bmapView.onPause()
-    }
-
+    override fun onResume() { super.onResume(); _binding?.bmapView?.onResume() }
+    override fun onPause() { _binding?.bmapView?.onPause(); super.onPause() }
     override fun onStop() {
+        locationSource?.stop()
+        _binding?.bmapView?.onStop()
         super.onStop()
-        if (_binding != null) binding.bmapView.onStop()
     }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        runCatching { locationManager?.removeUpdates(locationListener) }
-    }
-
     override fun onDestroyView() {
-        super.onDestroyView()
+        editorDialog?.dismiss()
+        editorDialog = null
+        locationSource?.close()
+        locationSource = null
+        _binding?.bmapView?.let { view ->
+            draft.cameraPosition = view.map.cameraPosition
+            gestureListener?.let { view.map.removeTencentMapGestureListener(it) }
+            view.map.setOnCameraChangeListener(null)
+            view.map.setOnMarkerClickListener(null)
+            view.map.isMyLocationEnabled = false
+            mapViewModel.detach(view.map)
+            view.onDestroy()
+        }
+        gestureListener = null
+        routeLine = null
+        previewLine = null
+        startMarker = null
+        endMarker = null
         _binding = null
+        super.onDestroyView()
     }
+    private fun toast(text: String) { context?.let { Toast.makeText(it, text, Toast.LENGTH_SHORT).show() } }
 }

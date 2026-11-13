@@ -10,8 +10,8 @@ android {
         applicationId = "com.wusan.location"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
         manifestPlaceholders["BUGLY_APPID"] = "222f9ef298"
         ndk {
             abiFilters.add("arm64-v8a")
@@ -21,12 +21,12 @@ android {
 
     buildTypes {
         debug {
-            manifestPlaceholders["APP_VERSION"] = "1.0-debug"
+            manifestPlaceholders["APP_VERSION"] = "2.0-debug"
             manifestPlaceholders["BUGLY_ENABLE_DEBUG"] = "true"
         }
         release {
             isMinifyEnabled = false
-            manifestPlaceholders["APP_VERSION"] = "1.0"
+            manifestPlaceholders["APP_VERSION"] = "2.0"
             manifestPlaceholders["BUGLY_ENABLE_DEBUG"] = "false"
         }
     }

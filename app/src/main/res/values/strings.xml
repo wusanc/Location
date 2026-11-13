@@ -164,4 +164,14 @@
     <string name="runtime_diagnostic_no_error">无记录</string>
     <string name="runtime_diagnostic_error_time">系统错误时间：%1$s</string>
     <string name="runtime_diagnostic_explanation">每秒刷新；离开页面或关闭面板后停止读取。系统计数在模拟开始时重置、停止后保留。投递点数按监听器分别累计，投递成功仅表示系统回调已发送，不代表目标 App 已保存轨迹。</string>
+    <string name="route_edit_reset">重新绘制</string>
+    <string name="route_edit_reset_confirm">清空当前草稿中的所有点，重新绘制？已保存的路线不受影响。</string>
+    <string name="route_edit_undo">撤回上一个点</string>
+    <string name="route_edit_save">完成并保存路线</string>
+    <string name="route_edit_my_location">移动到当前位置</string>
+    <string name="route_edit_duplicate">此位置已添加，请移动地图选择下一个点</string>
+    <string name="route_edit_need_points">请点击添加点，至少确认两个点后再保存</string>
+    <string name="route_edit_start_point">路线起点</string>
+    <string name="route_edit_last_point">最后确认的点</string>
+    <string name="route_edit_add_point">添加点</string>
 </resources>

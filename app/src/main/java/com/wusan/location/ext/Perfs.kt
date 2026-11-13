@@ -84,9 +84,19 @@ var Context.minSatelliteCount: Int
     }
 
 var Context.mapType: Int
-    get() = sharedPrefs.getInt("mapType", TencentMap.MAP_TYPE_NORMAL)
+    get() {
+        val stored = sharedPrefs.getInt("mapType", TencentMap.MAP_TYPE_NORMAL)
+        // Baidu persisted 1/2; Tencent uses 1000/1011. Normalize once without losing satellite preference.
+        val mapped = when (stored) {
+            2, TencentMap.MAP_TYPE_SATELLITE -> TencentMap.MAP_TYPE_SATELLITE
+            else -> TencentMap.MAP_TYPE_NORMAL
+        }
+        if (mapped != stored) sharedPrefs.edit { putInt("mapType", mapped) }
+        return mapped
+    }
     set(value) = sharedPrefs.edit {
-        putInt("mapType", value)
+        putInt("mapType", if (value == 2 || value == TencentMap.MAP_TYPE_SATELLITE)
+            TencentMap.MAP_TYPE_SATELLITE else TencentMap.MAP_TYPE_NORMAL)
     }
 
 var Context.rockerCoords: Pair<Int, Int>
