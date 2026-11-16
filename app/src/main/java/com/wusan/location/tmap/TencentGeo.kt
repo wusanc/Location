@@ -13,7 +13,7 @@ import com.wusan.location.bdmap.Poi
 /**
  * 腾讯地点检索封装：逆地理编码 + 关键词补全。
  *
- * Key 从 AndroidManifest 的 `TencentMapSDK` meta-data 读取。
+ * Key 在内存中解密后直接传给 SDK，不再从 Manifest 读取。
  *
  * 注意：腾讯 SDK 的包名里带 `object` 关键字，Kotlin 中必须写成 `object`。
  */
@@ -22,7 +22,7 @@ object TencentGeo {
     private var search: TencentSearch? = null
 
     private fun search(context: Context): TencentSearch =
-        search ?: TencentSearch(context.applicationContext).also { search = it }
+        search ?: TencentSearch(context.applicationContext, TencentMapKey.value, null).also { search = it }
 
     /** 逆地理编码：GCJ-02 坐标 → 文字地址 */
     fun reverseGeoCode(context: Context, location: LatLng, onResult: (String?) -> Unit) {

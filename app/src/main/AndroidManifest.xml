@@ -71,10 +71,7 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
-        <!-- 腾讯地图 Key（地图显示与地点检索共用） -->
-        <meta-data
-            android:name="TencentMapSDK"
-            android:value="IP5BZ-AELL7-XH3XG-P3PZC-CJU25-YSB7D" />
+        <!-- 腾讯地图 Key 由运行时解密后传给 SDK，不写入清单。 -->
 
         <!-- Xposed 模块配置 -->
         <meta-data

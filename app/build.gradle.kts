@@ -1,5 +1,85 @@
+import java.security.SecureRandom
+import java.util.Base64
+import java.util.Properties
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
+
 plugins {
     alias(libs.plugins.android.application)
+}
+
+
+// Keep the plaintext key in local.properties or CI environment variables, never in source.
+@DisableCachingByDefault(because = "Generated key material must not enter shared build caches")
+abstract class GenerateTencentMapKeyTask : DefaultTask() {
+    @get:Input
+    abstract val apiKey: Property<String>
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val plaintext = apiKey.get().trim()
+        require(plaintext.isNotEmpty()) {
+            "请在 local.properties 或环境变量中设置 TENCENT_MAP_KEY 后再构建"
+        }
+        val random = SecureRandom()
+        val material = ByteArray(32).also(random::nextBytes)
+        val partA = ByteArray(32).also(random::nextBytes)
+        val partB = ByteArray(32) { (material[it].toInt() xor partA[it].toInt()).toByte() }
+        val nonce = ByteArray(12).also(random::nextBytes)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(material, "AES"), GCMParameterSpec(128, nonce))
+        val encrypted = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        val encoder = Base64.getEncoder()
+        val source = """
+            package com.wusan.location.tmap;
+
+            // Generated at build time. No plaintext SDK key is written here.
+            final class GeneratedTencentMapKey {
+                static final String CIPHERTEXT = "${encoder.encodeToString(encrypted)}";
+                static final String NONCE = "${encoder.encodeToString(nonce)}";
+                static final String PART_A = "${encoder.encodeToString(partA)}";
+                static final String PART_B = "${encoder.encodeToString(partB)}";
+                private GeneratedTencentMapKey() {}
+            }
+        """.trimIndent()
+        val file = outputDirectory.file("com/wusan/location/tmap/GeneratedTencentMapKey.java").get().asFile
+        file.parentFile.mkdirs()
+        file.writeText(source, Charsets.UTF_8)
+        material.fill(0)
+        partA.fill(0)
+        partB.fill(0)
+    }
+}
+
+val localTencentMapKey = providers.fileContents(
+    rootProject.layout.projectDirectory.file("local.properties")
+).asText.orElse("").map { content ->
+    Properties().apply { load(content.reader()) }.getProperty("TENCENT_MAP_KEY", "").trim()
+}
+val configuredTencentMapKey = providers.environmentVariable("TENCENT_MAP_KEY")
+    .orElse("").zip(localTencentMapKey) { environment, local -> environment.trim().ifEmpty { local } }
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        val task = tasks.register<GenerateTencentMapKeyTask>(
+            "generate${variant.name.replaceFirstChar { it.uppercaseChar() }}TencentMapKey"
+        ) {
+            apiKey.set(configuredTencentMapKey)
+            outputDirectory.set(layout.buildDirectory.dir("generated/source/tencentMapKey/${variant.name}"))
+        }
+        variant.sources.java?.addGeneratedSourceDirectory(task, GenerateTencentMapKeyTask::outputDirectory)
+    }
 }
 
 android {

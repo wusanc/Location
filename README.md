@@ -56,13 +56,23 @@ nmea/         NMEA 语句模型，供 GNSS 语句注入使用
 - `com.wusan.location.service.MockServiceHelper` — App 侧命令封装
 - `com.wusan.location.ui.viewmodel.MockServiceViewModel` — 摇杆 / 路线两条移动循环
 App 与模块之间通过 `LocationManager.sendExtraCommand("portal", ...)` 通信，使用随机 key 校验调用方。
-'## 地图 Key
+## 地图 Key
 
-地图与地点检索使用腾讯位置服务，Key 写在 `app/src/main/AndroidManifest.xml` 的 `TencentMapSDK` meta-data 中。
+构建前，在项目根目录的 `local.properties` 中添加（此文件已被 Git 忽略）：
 
-**部署到新环境时必须去腾讯位置服务控制台把 Key 绑定到新的包名与签名 SHA1**，否则地图白屏、检索返回 401。坐标系统一为 GCJ-02，项目内部数据仍按 WGS-84 存储，由 `GeoCoord` 负责互转。
+```properties
+TENCENT_MAP_KEY=你的腾讯位置服务Key
+```
 
-## 使用'
+CI 也可配置同名环境变量 `TENCENT_MAP_KEY`，环境变量优先。未配置时，构建会给出明确提示。
+
+构建任务使用随机密钥和随机 nonce 生成 AES-256-GCM 密文，只将密文和拆分后的解密材料编入 APK。地图视图在创建引擎前解密传入 `TencentMapOptions`，地点检索通过 `TencentSearch` 构造参数传入，不再把明文 Key 放进 Manifest、资源或日志。生成文件位于 `app/build`，不提交到 Git，也不使用共享构建缓存。
+
+这是客户端凭据混淆，无法阻止逆向或运行时提取。保持腾讯控制台的应用授权配置与当前应用一致；已经出现在 Git 历史中的旧 Key 应在控制台更换，本次修改不会删除历史提交。
+
+地图显示使用 GCJ-02，项目内部路线使用 WGS-84，由 `GeoCoord` 负责互转。
+
+## 使用
 1. 安装 APK，在 LSPosed 中启用模块并勾选上面列出的作用域；
 2. 打开 App，授权定位与悬浮窗权限；
 3. 底部「功能」页选择：地图选点 / 位置模拟 / GNSS 模拟 / 路线模拟；
